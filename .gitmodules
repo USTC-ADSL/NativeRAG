@@ -1,0 +1,12 @@
+[submodule "third_party/faiss"]
+	path = third_party/faiss
+	url = https://github.com/facebookresearch/faiss.git
+[submodule "third_party/sqlite-vec"]
+	path = third_party/sqlite-vec
+	url = https://github.com/asg017/sqlite-vec.git
+[submodule "third_party/MNN"]
+	path = third_party/MNN
+	url = https://github.com/alibaba/MNN.git
+[submodule "third_party/mllm"]
+	path = third_party/mllm
+	url = https://github.com/UbiquitousLearning/mllm.git

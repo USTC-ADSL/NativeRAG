@@ -5,10 +5,10 @@
 
 #include "RAGPipeline.hpp"
 
-#include "mobile_rag/loader/TextFileLoader.hpp"
-#include "mobile_rag/embedding/MNNEmbedding.hpp"
-#include "mobile_rag/vector_db/FaissDB.hpp"
-#include "mobile_rag/llm/LlamaCppModel.hpp"
+#include "loader/TextFileLoader.hpp"
+#include "embedding/MNNEmbedding.hpp"
+#include "vector_db/FaissDB.hpp"
+#include "llm/LlamaCppModel.hpp"
 
 int main(int argc, char** argv) {
   using namespace mobile_rag;

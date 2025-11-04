@@ -1,4 +1,4 @@
-#include "mobile_rag/vector_db/FaissDB.hpp"
+#include "vector_db/FaissDB.hpp"
 
 #include <exception>
 #include <iostream>

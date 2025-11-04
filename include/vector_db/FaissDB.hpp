@@ -9,7 +9,7 @@
 #include "faiss/Index.h"
 #include "faiss/index_io.h"
 
-#include "mobile_rag/vector_db/IVectorDB.hpp"
+#include "vector_db/IVectorDB.hpp"
 
 namespace mobile_rag {
 

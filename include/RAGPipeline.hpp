@@ -7,10 +7,10 @@
 #include <utility>
 #include <vector>
 
-#include "mobile_rag/loader/IDocumentLoader.hpp"
-#include "mobile_rag/embedding/IEmbeddingModel.hpp"
-#include "mobile_rag/vector_db/IVectorDB.hpp"
-#include "mobile_rag/llm/ILargeLanguageModel.hpp"
+#include "loader/IDocumentLoader.hpp"
+#include "embedding/IEmbeddingModel.hpp"
+#include "vector_db/IVectorDB.hpp"
+#include "llm/ILargeLanguageModel.hpp"
 
 namespace mobile_rag {
 

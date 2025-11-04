@@ -1,4 +1,4 @@
-#include "mobile_rag/llm/LlamaCppModel.hpp"
+#include "llm/LlamaCppModel.hpp"
 
 namespace mobile_rag {
 

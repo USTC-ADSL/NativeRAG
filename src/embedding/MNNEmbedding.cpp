@@ -1,4 +1,4 @@
-#include "mobile_rag/embedding/MNNEmbedding.hpp"
+#include "embedding/MNNEmbedding.hpp"
 
 namespace mobile_rag {
 
