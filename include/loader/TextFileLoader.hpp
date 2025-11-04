@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-#include "mobile_rag/loader/IDocumentLoader.hpp"
+#include "loader/IDocumentLoader.hpp"
 
 namespace mobile_rag {
 

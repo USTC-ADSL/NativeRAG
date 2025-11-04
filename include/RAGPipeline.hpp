@@ -9,7 +9,7 @@
 
 #include "loader/IDocumentLoader.hpp"
 #include "embedding/IEmbeddingModel.hpp"
-#include "vector_db/IVectorDB.hpp"
+#include "vector_Index/IVectorIndex.hpp"
 #include "llm/ILargeLanguageModel.hpp"
 
 namespace mobile_rag {
@@ -18,7 +18,7 @@ class RAGPipeline {
  public:
   RAGPipeline(std::shared_ptr<IDocumentLoader> loader,
               std::shared_ptr<IEmbeddingModel> embedder,
-              std::shared_ptr<IVectorDB> db,
+              std::shared_ptr<IVectorIndex> index,
               std::shared_ptr<ILargeLanguageModel> llm);
 
   void build_index_from_file(const std::string& file_path);
@@ -28,7 +28,7 @@ class RAGPipeline {
  private:
   std::shared_ptr<IDocumentLoader> loader_;
   std::shared_ptr<IEmbeddingModel> embedder_;
-  std::shared_ptr<IVectorDB> db_;
+  std::shared_ptr<IVectorIndex> index_;
   std::shared_ptr<ILargeLanguageModel> llm_;
 
   std::map<int64_t, std::string> id_to_chunk_;

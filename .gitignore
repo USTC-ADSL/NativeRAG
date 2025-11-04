@@ -1,2 +1,5 @@
 third_party/MobileRAG
 third_party/purecpp
+build/
+.vscode/
+.cache/

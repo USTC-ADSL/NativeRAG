@@ -7,11 +7,11 @@ namespace mobile_rag {
 
 RAGPipeline::RAGPipeline(std::shared_ptr<IDocumentLoader> loader,
                          std::shared_ptr<IEmbeddingModel> embedder,
-                         std::shared_ptr<IVectorDB> db,
+                         std::shared_ptr<IVectorIndex> index,
                          std::shared_ptr<ILargeLanguageModel> llm)
     : loader_(std::move(loader)),
       embedder_(std::move(embedder)),
-      db_(std::move(db)),
+      index_(std::move(index)),
       llm_(std::move(llm)) {}
 
 void RAGPipeline::build_index_from_file(const std::string& file_path) {
@@ -36,7 +36,7 @@ void RAGPipeline::build_index_from_file(const std::string& file_path) {
   }
 
   if (!vectors.empty()) {
-    db_->add_vectors(vectors, ids);
+    index_->add_vectors(vectors, ids);
   }
 }
 
@@ -49,7 +49,7 @@ std::string RAGPipeline::answer_query(const std::string& query) {
 
   // Choose a small default k for demo purposes
   constexpr int kTopK = 5;
-  std::vector<std::pair<int64_t, float>> results = db_->search(q, kTopK);
+  std::vector<std::pair<int64_t, float>> results = index_->search(q, kTopK);
 
   std::vector<std::string> retrieved_chunks;
   retrieved_chunks.reserve(results.size());

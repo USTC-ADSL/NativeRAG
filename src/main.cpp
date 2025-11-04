@@ -7,18 +7,18 @@
 
 #include "loader/TextFileLoader.hpp"
 #include "embedding/MNNEmbedding.hpp"
-#include "vector_db/FaissDB.hpp"
-#include "llm/LlamaCppModel.hpp"
+#include "vector_Index/FaissIndex.hpp"
+#include "llm/LLMFactory.hpp"
 
 int main(int argc, char** argv) {
   using namespace mobile_rag;
 
   auto loader = std::make_shared<TextFileLoader>();
   auto embedder = std::make_shared<MNNEmbedding>();
-  auto db = std::make_shared<FaissDB>();
-  auto llm = std::make_shared<LlamaCppModel>();
+  auto index = std::make_shared<FaissIndex>();
+  auto llm = create_llm();
 
-  RAGPipeline pipeline(loader, embedder, db, llm);
+  RAGPipeline pipeline(loader, embedder, index, llm);
 
   if (argc < 2) {
     std::cerr << "Usage:\n"

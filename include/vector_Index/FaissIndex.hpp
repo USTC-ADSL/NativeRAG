@@ -9,14 +9,14 @@
 #include "faiss/Index.h"
 #include "faiss/index_io.h"
 
-#include "vector_db/IVectorDB.hpp"
+#include "vector_Index/IVectorIndex.hpp"
 
 namespace mobile_rag {
 
-class FaissDB : public IVectorDB {
+class FaissIndex : public IVectorIndex {
  public:
-  FaissDB() = default;
-  ~FaissDB() override = default;
+  FaissIndex() = default;
+  ~FaissIndex() override = default;
 
   bool add_vectors(const std::vector<std::vector<float>>& vectors,
                    const std::vector<int64_t>& ids) override;
@@ -33,5 +33,6 @@ class FaissDB : public IVectorDB {
 };
 
 }  // namespace mobile_rag
+
 
 

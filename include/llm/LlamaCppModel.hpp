@@ -5,7 +5,7 @@
 
 #include "llama.h"
 
-#include "mobile_rag/llm/ILargeLanguageModel.hpp"
+#include "llm/ILargeLanguageModel.hpp"
 
 namespace mobile_rag {
 

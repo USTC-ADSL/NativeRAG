@@ -1,19 +1,16 @@
 #pragma once
 
-#include <memory>
 #include <string>
 #include <vector>
-
-#include "MNN/Interpreter.hpp"
 
 #include "embedding/IEmbeddingModel.hpp"
 
 namespace mobile_rag {
 
-class MNNEmbedding : public IEmbeddingModel {
+class LlamaCppEmbedding : public IEmbeddingModel {
  public:
-  MNNEmbedding() = default;
-  ~MNNEmbedding() override = default;
+  LlamaCppEmbedding() = default;
+  ~LlamaCppEmbedding() override = default;
 
   bool load_model(const std::string& model_path) override;
 
@@ -23,11 +20,10 @@ class MNNEmbedding : public IEmbeddingModel {
       const std::vector<std::string>& texts) override;
 
  private:
-  std::shared_ptr<MNN::Interpreter> interpreter_;
-  MNN::Session* session_ = nullptr;
   int embed_dim_ = 384;
 };
 
 }  // namespace mobile_rag
+
 
 

@@ -10,3 +10,6 @@
 [submodule "third_party/mllm"]
 	path = third_party/mllm
 	url = https://github.com/UbiquitousLearning/mllm.git
+[submodule "third_party/llama.cpp"]
+	path = third_party/llama.cpp
+	url = https://github.com/ggml-org/llama.cpp.git
