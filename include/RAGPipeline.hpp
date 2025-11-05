@@ -25,7 +25,7 @@ class RAGPipeline {
 
   std::string answer_query(const std::string& query);
 
- private:
+ protected:
   std::shared_ptr<IDocumentLoader> loader_;
   std::shared_ptr<IEmbeddingModel> embedder_;
   std::shared_ptr<IVectorIndex> index_;
