@@ -44,11 +44,122 @@ Support different vector index(base on Faiss)
 
     - 实现： MLLMBackend, LlamaCppBackend。
 
-## 3. ⚙️ RAG 工作流 (Workflow)
+## 3. 🔨 编译与构建
+
+### 3.1 两种集成方式
+
+项目支持两种集成方式，用户可根据需求选择：
+
+#### **方式1: 使用 Prebuilt 库（推荐，快速）**
+
+项目已预编译了所有第三方库，存放在 `prebuilt/` 目录中。这是最快的方式，适合大多数用户。
+
+**目录结构：**
+```
+prebuilt/
+├── include/              # 统一的头文件（所有平台共用）
+│   ├── faiss/           # Faiss 向量索引库头文件
+│   ├── MNN/             # MNN 推理框架头文件
+│   └── llama/           # llama.cpp 推理框架头文件
+├── linux-x86_64/        # Linux x86_64 平台库
+│   ├── faiss/           # libfaiss.so
+│   ├── MNN/             # libMNN.so, libMNN_Express.so
+│   └── llama/           # libllama.so, libggml*.so
+└── android-aarch64/     # Android aarch64 平台库
+    ├── faiss/           # libfaiss.so
+    ├── MNN/             # libMNN_Express.so
+    └── llama/           # libllama.so, libggml*.so
+```
+
+**快速编译：**
+
+```bash
+mkdir build && cd build
+cmake .. -DUSE_PREBUILT=ON
+make -j$(nproc)
+```
+
+#### **方式2: 手动编译第三方库**
+
+如需自定义编译选项或修改第三方库源码，可使用手动编译方式。
+
+**编译脚本：**
+
+```bash
+# 编译所有第三方库
+./build_thirdparty.sh --linux --all
+
+# 编译 Android 平台
+./build_thirdparty.sh --android --all
+
+# 仅编译特定库
+./build_thirdparty.sh --linux --faiss
+./build_thirdparty.sh --linux --mnn
+./build_thirdparty.sh --linux --llama
+
+# 查看帮助
+./build_thirdparty.sh --help
+```
+
+**编译依赖：**
+
+- CMake >= 3.15
+- GCC/Clang 编译器
+- Android NDK（仅编译 Android 平台时需要）
+- OpenBLAS（用于 Faiss 编译）
+
+**编译项目：**
+
+```bash
+mkdir build && cd build
+cmake .. -DUSE_PREBUILT=OFF
+make -j$(nproc)
+```
+
+### 3.2 编译选项
+
+| 选项 | 默认值 | 说明 |
+|------|--------|------|
+| `USE_PREBUILT` | ON | 使用 prebuilt 库（ON）或 third_party 库（OFF） |
+| `LLM_BACKEND` | MNN | LLM 后端：MNN / MLLM / LlamaCpp |
+| `VECTOR_INDEX` | Faiss | 向量索引：Faiss / None |
+| `BUILD_TESTS` | ON | 编译单元测试 |
+
+**编译示例：**
+
+```bash
+# 使用 Prebuilt + MNN + Faiss（默认）
+mkdir build && cd build
+cmake .. -DUSE_PREBUILT=ON
+make -j$(nproc)
+
+# 使用 Prebuilt + LlamaCpp + Faiss
+mkdir build && cd build
+cmake .. -DUSE_PREBUILT=ON -DLLM_BACKEND=LlamaCpp
+make -j$(nproc)
+
+# 手动编译 + MLLM + Faiss
+./build_thirdparty.sh --linux --all
+mkdir build && cd build
+cmake .. -DUSE_PREBUILT=OFF -DLLM_BACKEND=MLLM
+make -j$(nproc)
+```
+
+### 3.3 运行
+
+```bash
+# 运行主程序
+./mobile_rag_cli
+
+# 运行测试
+ctest --output-on-failure
+```
+
+## 4. ⚙️ RAG 工作流 (Workflow)
 
 整个工作流分为“构建”和“查询”两个阶段：
 
-### 阶段一：构建 (Indexing / Build Phase)
+### 4.1 阶段一：构建 (Indexing / Build Phase)
 
 此阶段为离线处理，用于构建索引。
 
@@ -82,7 +193,7 @@ Support different vector index(base on Faiss)
 
     - 输出： 持久化的索引文件和元数据文件。
 
-### 阶段二：查询 (Query Phase)
+### 4.2 阶段二：查询 (Query Phase)
 
 此阶段为在线推理，用于响应用户查询。
 
@@ -122,7 +233,7 @@ Support different vector index(base on Faiss)
 
 - 输出： 最终答案 (字符串)
 
-4. 👥 预期分工 (Team Breakdown)
+## 5. 👥 预期分工 (Team Breakdown)
 
 为并行推进项目，按以下分工：
 
