@@ -4,11 +4,12 @@
 
 #include "RAGPipelineWithDataset.hpp"
 #include "dataset/TrivialQADataset.hpp"
+#include "dataset/VectorDataGenerator.hpp"
 #include "embedding/MNNEmbedding.hpp"
 #include "llm/LLMFactory.hpp"
 #include "loader/TextFileLoader.hpp"
 #include "vector_Index/FaissIndex.hpp"
-#include "tests/TestBase.hpp"
+#include "TestBase.hpp"
 
 using namespace mobile_rag;
 using namespace mobile_rag::testing;

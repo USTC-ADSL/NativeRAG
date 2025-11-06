@@ -1,9 +1,10 @@
 #include <cassert>
+#include <cmath>
 #include <iostream>
 #include <memory>
 
 #include "embedding/MNNEmbedding.hpp"
-#include "tests/TestBase.hpp"
+#include "TestBase.hpp"
 
 using namespace mobile_rag;
 using namespace mobile_rag::testing;

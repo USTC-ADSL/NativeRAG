@@ -1,5 +1,55 @@
 # Tests CMakeLists.txt
 
+# Get prebuilt directory from parent CMakeLists
+if(USE_PREBUILT)
+    set(PREBUILT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../prebuilt")
+else()
+    set(THIRD_PARTY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../third_party")
+endif()
+
+# Find required libraries for tests
+if(USE_PREBUILT)
+    set(TARGET_PLATFORM "linux-x86_64")
+    if(ANDROID)
+        set(TARGET_PLATFORM "android-aarch64")
+    endif()
+
+    set(FAISS_PREBUILT_DIR "${PREBUILT_DIR}/${TARGET_PLATFORM}/faiss")
+
+    # Add Faiss include directory directly (headers are in prebuilt/include/faiss/)
+    set(FAISS_INCLUDE_WRAPPER "${PREBUILT_DIR}/include")
+
+    # Find Faiss library in prebuilt/platform/faiss/ (libraries are directly in the directory)
+    find_library(FAISS_LIBRARY NAMES faiss
+        HINTS "${FAISS_PREBUILT_DIR}"
+        NO_DEFAULT_PATH
+    )
+
+    # Find MNN library in prebuilt/platform/MNN/ (libraries are directly in the directory)
+    find_library(MNN_LIBRARY NAMES MNN
+        HINTS "${PREBUILT_DIR}/${TARGET_PLATFORM}/MNN"
+        NO_DEFAULT_PATH
+    )
+
+    # Find MNN_Express library in prebuilt/platform/MNN/ (libraries are directly in the directory)
+    find_library(MNN_EXPRESS_LIBRARY NAMES MNN_Express
+        HINTS "${PREBUILT_DIR}/${TARGET_PLATFORM}/MNN"
+        NO_DEFAULT_PATH
+    )
+
+    # Find llm library in prebuilt/platform/MNN/ (libraries are directly in the directory)
+    find_library(MNN_LLM_LIBRARY NAMES llm
+        HINTS "${PREBUILT_DIR}/${TARGET_PLATFORM}/MNN"
+        NO_DEFAULT_PATH
+    )
+
+    # Find llama.cpp library in prebuilt/platform/llama/ (libraries are directly in the directory)
+    find_library(LLAMA_LIBRARY NAMES llama
+        HINTS "${PREBUILT_DIR}/${TARGET_PLATFORM}/llama"
+        NO_DEFAULT_PATH
+    )
+endif()
+
 # Build dataset library
 add_library(dataset_lib
     ${CMAKE_CURRENT_SOURCE_DIR}/../dataset/src/TrivialQADataset.cpp
@@ -10,6 +60,7 @@ target_include_directories(dataset_lib
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/../include
         ${CMAKE_CURRENT_SOURCE_DIR}/../dataset/include
+        ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
 # Find nlohmann_json
@@ -42,6 +93,39 @@ target_link_libraries(test_vectordb
         dataset_lib
 )
 
+# Core RAG library (implementation files)
+add_library(rag_core STATIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/RAGPipeline.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/embedding/MNNEmbedding.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/embedding/LlamaCppEmbedding.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/vector_db/FaissIndex.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/vector_db/SqliteVectorDB.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/llm/MNNModel.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/llm/LLMFactory_MNN.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/loader/TXTLoader/TxtLoader.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/loader/TXTLoader/TextFileLoader.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/loader/Chunk/CharacterSplitter.cpp
+)
+
+target_include_directories(rag_core PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+)
+
+# Add Faiss headers as system include to handle both "faiss/Index.h" and <faiss/MetricType.h>
+target_include_directories(rag_core SYSTEM PUBLIC
+    ${FAISS_INCLUDE_WRAPPER}
+    ${PREBUILT_DIR}/include/MNN
+    ${PREBUILT_DIR}/include/llama
+)
+
+target_link_libraries(rag_core PUBLIC
+    ${MNN_LIBRARY}
+    ${MNN_EXPRESS_LIBRARY}
+    ${MNN_LLM_LIBRARY}
+    ${FAISS_LIBRARY}
+    ${LLAMA_LIBRARY}
+)
+
 # RAGPipelineWithDataset library
 add_library(rag_pipeline_dataset STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/RAGPipelineWithDataset.cpp
@@ -63,11 +147,15 @@ add_executable(test_embedding
 
 target_include_directories(test_embedding PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${PREBUILT_DIR}/include/faiss
+    ${PREBUILT_DIR}/include/MNN
+    ${PREBUILT_DIR}/include/llama
 )
 
 target_link_libraries(test_embedding PRIVATE
-    rag_core
     dataset_lib
+    rag_core
 )
 
 # Group B (LLM) tests
@@ -77,11 +165,15 @@ add_executable(test_llm
 
 target_include_directories(test_llm PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${PREBUILT_DIR}/include/faiss
+    ${PREBUILT_DIR}/include/MNN
+    ${PREBUILT_DIR}/include/llama
 )
 
 target_link_libraries(test_llm PRIVATE
-    rag_core
     dataset_lib
+    rag_core
 )
 
 # Group C (VectorDB) integrated tests
@@ -91,11 +183,15 @@ add_executable(test_vectordb_integrated
 
 target_include_directories(test_vectordb_integrated PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${PREBUILT_DIR}/include/faiss
+    ${PREBUILT_DIR}/include/MNN
+    ${PREBUILT_DIR}/include/llama
 )
 
 target_link_libraries(test_vectordb_integrated PRIVATE
-    rag_core
     dataset_lib
+    rag_core
 )
 
 # RAG Pipeline integration tests
@@ -105,12 +201,16 @@ add_executable(test_rag_integration
 
 target_include_directories(test_rag_integration PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${PREBUILT_DIR}/include/faiss
+    ${PREBUILT_DIR}/include/MNN
+    ${PREBUILT_DIR}/include/llama
 )
 
 target_link_libraries(test_rag_integration PRIVATE
-    rag_core
     rag_pipeline_dataset
     dataset_lib
+    rag_core
 )
 
 # Enable testing

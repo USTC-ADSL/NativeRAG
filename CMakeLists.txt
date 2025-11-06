@@ -107,12 +107,28 @@ if (VECTOR_INDEX STREQUAL "Faiss")
   if(USE_PREBUILT)
     # 使用 prebuilt 库
     message(STATUS "Looking for Faiss in prebuilt/")
-    target_include_directories(mobile_rag_cli PRIVATE "${PREBUILT_DIR}/include")
+    set(FAISS_PREBUILT_DIR "${PREBUILT_DIR}/${TARGET_PLATFORM}/faiss")
 
+    # Add Faiss include directory directly (headers are in prebuilt/include/faiss/)
+    target_include_directories(mobile_rag_cli SYSTEM PRIVATE "${PREBUILT_DIR}/include")
+
+    # Find library in prebuilt/platform/faiss/ (libraries are directly in the directory)
     find_library(FAISS_LIBRARY NAMES faiss
-      HINTS "${PREBUILT_DIR}/${TARGET_PLATFORM}/faiss"
+      HINTS "${FAISS_PREBUILT_DIR}"
       NO_DEFAULT_PATH
     )
+
+    # Also link OpenBLAS if it exists (for Android)
+    if(TARGET_PLATFORM STREQUAL "android-aarch64")
+      find_library(OPENBLAS_LIBRARY NAMES openblas
+        HINTS "${PREBUILT_DIR}/${TARGET_PLATFORM}/openblas/lib"
+        NO_DEFAULT_PATH
+      )
+      if(OPENBLAS_LIBRARY)
+        message(STATUS "Found OpenBLAS library: ${OPENBLAS_LIBRARY}")
+        target_link_libraries(mobile_rag_cli PRIVATE ${OPENBLAS_LIBRARY})
+      endif()
+    endif()
   else()
     # 使用 third_party 库
     message(STATUS "Looking for Faiss in third_party/")
@@ -150,10 +166,14 @@ if (LLM_BACKEND STREQUAL "MNN")
   if(USE_PREBUILT)
     # 使用 prebuilt 库
     message(STATUS "Looking for MNN in prebuilt/")
-    target_include_directories(mobile_rag_cli PRIVATE "${PREBUILT_DIR}/include")
+    set(MNN_PREBUILT_DIR "${PREBUILT_DIR}/${TARGET_PLATFORM}/MNN")
 
+    # Include headers from prebuilt/include/MNN/
+    target_include_directories(mobile_rag_cli PRIVATE "${PREBUILT_DIR}/include/MNN")
+
+    # Find library in prebuilt/platform/MNN/ (libraries are directly in the directory)
     find_library(MNN_LIBRARY NAMES MNN
-      HINTS "${PREBUILT_DIR}/${TARGET_PLATFORM}/MNN"
+      HINTS "${MNN_PREBUILT_DIR}"
       NO_DEFAULT_PATH
     )
   else()
@@ -183,6 +203,30 @@ if (LLM_BACKEND STREQUAL "MNN")
   if (MNN_LIBRARY)
     message(STATUS "Found MNN library: ${MNN_LIBRARY}")
     target_link_libraries(mobile_rag_cli PRIVATE "${MNN_LIBRARY}")
+
+    # Also link MNN_Express if using prebuilt
+    if(USE_PREBUILT)
+      find_library(MNN_EXPRESS_LIBRARY NAMES MNN_Express
+        HINTS "${MNN_PREBUILT_DIR}"
+        NO_DEFAULT_PATH
+      )
+      if(MNN_EXPRESS_LIBRARY)
+        message(STATUS "Found MNN_Express library: ${MNN_EXPRESS_LIBRARY}")
+        target_link_libraries(mobile_rag_cli PRIVATE "${MNN_EXPRESS_LIBRARY}")
+      endif()
+
+      # Link libllm if it exists (generated when MNN_BUILD_LLM=ON)
+      find_library(MNN_LLM_LIBRARY NAMES llm
+        HINTS "${MNN_PREBUILT_DIR}"
+        NO_DEFAULT_PATH
+      )
+      if(MNN_LLM_LIBRARY)
+        message(STATUS "Found MNN LLM library: ${MNN_LLM_LIBRARY}")
+        target_link_libraries(mobile_rag_cli PRIVATE "${MNN_LLM_LIBRARY}")
+      else()
+        message(WARNING "MNN LLM library not found. Make sure to compile MNN with -DMNN_BUILD_LLM=ON")
+      endif()
+    endif()
   else()
     message(WARNING "MNN library not found. Please build it or use prebuilt libraries.")
   endif()
@@ -199,10 +243,14 @@ elseif (LLM_BACKEND STREQUAL "MLLM")
   if(USE_PREBUILT)
     # 使用 prebuilt 库
     message(STATUS "Looking for MLLM in prebuilt/")
-    target_include_directories(mobile_rag_cli PRIVATE "${PREBUILT_DIR}/include")
+    set(MLLM_PREBUILT_DIR "${PREBUILT_DIR}/${TARGET_PLATFORM}/mllm")
 
+    # Include headers from prebuilt/include/mllm/
+    target_include_directories(mobile_rag_cli PRIVATE "${PREBUILT_DIR}/include/mllm")
+
+    # Find library in prebuilt/platform/mllm/ (libraries are directly in the directory)
     find_library(MLLM_LIBRARY NAMES mllm
-      HINTS "${PREBUILT_DIR}/${TARGET_PLATFORM}/mllm"
+      HINTS "${MLLM_PREBUILT_DIR}"
       NO_DEFAULT_PATH
     )
   else()
@@ -235,10 +283,14 @@ elseif (LLM_BACKEND STREQUAL "LlamaCpp")
   if(USE_PREBUILT)
     # 使用 prebuilt 库
     message(STATUS "Looking for llama.cpp in prebuilt/")
-    target_include_directories(mobile_rag_cli PRIVATE "${PREBUILT_DIR}/include")
+    set(LLAMA_PREBUILT_DIR "${PREBUILT_DIR}/${TARGET_PLATFORM}/llama")
 
+    # Include headers from prebuilt/include/llama/
+    target_include_directories(mobile_rag_cli PRIVATE "${PREBUILT_DIR}/include/llama")
+
+    # Find library in prebuilt/platform/llama/ (libraries are directly in the directory)
     find_library(LLAMA_LIBRARY NAMES llama
-      HINTS "${PREBUILT_DIR}/${TARGET_PLATFORM}/llama"
+      HINTS "${LLAMA_PREBUILT_DIR}"
       NO_DEFAULT_PATH
     )
   else()
