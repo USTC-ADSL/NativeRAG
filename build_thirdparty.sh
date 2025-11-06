@@ -18,6 +18,12 @@ PREBUILT_ANDROID_FAISS="${PREBUILT_DIR}/android-aarch64/faiss"
 PREBUILT_ANDROID_MNN="${PREBUILT_DIR}/android-aarch64/MNN"
 PREBUILT_ANDROID_LLAMA="${PREBUILT_DIR}/android-aarch64/llama"
 
+# Shared include directory (headers are the same for all architectures)
+PREBUILT_INCLUDE_FAISS="${PREBUILT_DIR}/include/faiss"
+PREBUILT_INCLUDE_MNN="${PREBUILT_DIR}/include/MNN"
+PREBUILT_INCLUDE_LLAMA="${PREBUILT_DIR}/include/llama"
+PREBUILT_INCLUDE_OPENBLAS="${PREBUILT_DIR}/include/openblas"
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -35,6 +41,79 @@ print_warn() {
 
 print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
+}
+
+# Function to copy headers to shared include directory (only if not already present)
+copy_headers() {
+    local src_dir="$1"
+    local lib_name="$2"
+
+    case "$lib_name" in
+        faiss)
+            local dest_dir="${PREBUILT_INCLUDE_FAISS}"
+            ;;
+        MNN)
+            local dest_dir="${PREBUILT_INCLUDE_MNN}"
+            ;;
+        llama)
+            local dest_dir="${PREBUILT_INCLUDE_LLAMA}"
+            ;;
+        openblas)
+            local dest_dir="${PREBUILT_INCLUDE_OPENBLAS}"
+            ;;
+        *)
+            print_error "Unknown library: $lib_name"
+            return 1
+            ;;
+    esac
+
+    # Check if headers already exist
+    if [ -d "$dest_dir" ] && [ "$(ls -A "$dest_dir")" ]; then
+        print_info "Headers for $lib_name already exist at $dest_dir, skipping copy"
+        return 0
+    fi
+
+    # Create destination directory
+    mkdir -p "$dest_dir"
+
+    # Copy headers
+    if [ -d "$src_dir" ]; then
+        cp -r "$src_dir"/* "$dest_dir/" 2>/dev/null || true
+        print_info "Copied headers for $lib_name to $dest_dir"
+    else
+        print_warn "Source directory $src_dir does not exist"
+    fi
+}
+
+# Function to copy libraries to architecture-specific directory
+copy_libraries() {
+    local src_dir="$1"
+    local arch="$2"
+    local lib_name="$3"
+
+    case "$arch" in
+        linux-x86_64)
+            local dest_dir="${PREBUILT_DIR}/linux-x86_64/${lib_name}"
+            ;;
+        android-aarch64)
+            local dest_dir="${PREBUILT_DIR}/android-aarch64/${lib_name}"
+            ;;
+        *)
+            print_error "Unknown architecture: $arch"
+            return 1
+            ;;
+    esac
+
+    # Create destination directory
+    mkdir -p "$dest_dir"
+
+    # Copy all .so files
+    if [ -d "$src_dir" ]; then
+        cp "$src_dir"/*.so* "$dest_dir" 2>/dev/null || true
+        print_info "Copied libraries for $lib_name to $dest_dir/"
+    else
+        print_warn "Source directory $src_dir does not exist"
+    fi
 }
 
 # Check if Android NDK is available
@@ -143,21 +222,20 @@ if [ "$BUILD_ANDROID" = true ]; then
     check_android_ndk || exit 1
 fi
 
-# Create prebuilt directories (each library has its own directory with lib and include subdirectories)
-# Linux x86_64
-mkdir -p "${PREBUILT_LINUX_FAISS}/lib"
-mkdir -p "${PREBUILT_LINUX_FAISS}/include"
-mkdir -p "${PREBUILT_LINUX_MNN}/lib"
-mkdir -p "${PREBUILT_LINUX_MNN}/include"
-mkdir -p "${PREBUILT_LINUX_LLAMA}/lib"
-mkdir -p "${PREBUILT_LINUX_LLAMA}/include"
-# Android aarch64
-mkdir -p "${PREBUILT_ANDROID_FAISS}/lib"
-mkdir -p "${PREBUILT_ANDROID_FAISS}/include"
-mkdir -p "${PREBUILT_ANDROID_MNN}/lib"
-mkdir -p "${PREBUILT_ANDROID_MNN}/include"
-mkdir -p "${PREBUILT_ANDROID_LLAMA}/lib"
-mkdir -p "${PREBUILT_ANDROID_LLAMA}/include"
+# Create prebuilt directories
+# Linux x86_64 (lib only, headers are shared)
+mkdir -p "${PREBUILT_LINUX_FAISS}"
+mkdir -p "${PREBUILT_LINUX_MNN}"
+mkdir -p "${PREBUILT_LINUX_LLAMA}"
+# Android aarch64 (lib only, headers are shared)
+mkdir -p "${PREBUILT_ANDROID_FAISS}"
+mkdir -p "${PREBUILT_ANDROID_MNN}"
+mkdir -p "${PREBUILT_ANDROID_LLAMA}"
+# Shared include directories (headers are the same for all architectures)
+mkdir -p "${PREBUILT_INCLUDE_FAISS}"
+mkdir -p "${PREBUILT_INCLUDE_MNN}"
+mkdir -p "${PREBUILT_INCLUDE_LLAMA}"
+mkdir -p "${PREBUILT_INCLUDE_OPENBLAS}"
 
 #################
 # Build Faiss   #
@@ -181,12 +259,11 @@ build_faiss_linux() {
     make -j$(nproc)
     make install
 
-    # Copy libraries to prebuilt/linux-x86_64/faiss/lib/
-    cp install/lib/libfaiss.so "${PREBUILT_LINUX_FAISS}/lib/"
+    # Copy libraries to prebuilt/linux-x86_64/faiss/
+    copy_libraries "install/lib" "linux-x86_64" "faiss"
 
-
-    # Copy headers to prebuilt/linux-x86_64/faiss/include/
-    cp -r install/include/faiss/* "${PREBUILT_LINUX_FAISS}/include/"
+    # Copy headers to prebuilt/include/faiss/ (shared across architectures)
+    copy_headers "install/include/faiss" "faiss"
 
     print_info "Faiss for Linux built successfully"
 }
@@ -212,17 +289,11 @@ build_openblas_android() {
     make -j$(nproc)
     make install
 
-    # Copy libraries to prebuilt/android-aarch64/openblas/lib/
-    mkdir -p "${PREBUILT_DIR}/android-aarch64/openblas/lib"
-    mkdir -p "${PREBUILT_DIR}/android-aarch64/openblas/include"
+    # Copy libraries to prebuilt/android-aarch64/openblas/
+    copy_libraries "install/lib" "android-aarch64" "openblas"
 
-    if [ -f "install/lib/libopenblas.so" ]; then
-        cp install/lib/libopenblas.so "${PREBUILT_DIR}/android-aarch64/openblas/lib/"
-        print_info "Copied libopenblas.so to prebuilt/android-aarch64/openblas/lib/"
-    fi
-
-    # Copy headers
-    cp -r install/include/* "${PREBUILT_DIR}/android-aarch64/openblas/include/" 2>/dev/null || true
+    # Copy headers to prebuilt/include/openblas/ (shared across architectures)
+    copy_headers "install/include" "openblas"
 
     print_info "OpenBLAS for Android built successfully"
 }
@@ -253,21 +324,23 @@ build_faiss_android() {
         -DFAISS_ENABLE_PYTHON=OFF \
         -DFAISS_ENABLE_MKL=OFF \
         -DBUILD_TESTING=OFF \
-        -DBLAS_LIBRARIES="${PREBUILT_DIR}/android-aarch64/openblas/lib/libopenblas.so" \
-        -DBLAS_INCLUDE_DIRS="${PREBUILT_DIR}/android-aarch64/openblas/include" \
+        -DBLAS_LIBRARIES="${PREBUILT_DIR}/android-aarch64/openblas/libopenblas.so" \
+        -DBLAS_INCLUDE_DIRS="${PREBUILT_INCLUDE_OPENBLAS}" \
+        -DLAPACK_LIBRARIES="${PREBUILT_DIR}/android-aarch64/openblas/libopenblas.so" \
+        -DLAPACK_INCLUDE_DIRS="${PREBUILT_INCLUDE_OPENBLAS}" \
         -DCMAKE_INSTALL_PREFIX="${PWD}/install"
 
     make -j$(nproc)
     make install
 
-    # Copy libraries to prebuilt/android-aarch64/faiss/lib/
-    cp install/lib/libfaiss.so "${PREBUILT_ANDROID_FAISS}/lib/"
+    # Copy libraries to prebuilt/android-aarch64/faiss/
+    copy_libraries "install/lib" "android-aarch64" "faiss"
 
     # Also copy OpenBLAS dependency
-    cp "${PREBUILT_DIR}/android-aarch64/openblas/lib/libopenblas.so" "${PREBUILT_ANDROID_FAISS}/lib/"
+    cp "${PREBUILT_DIR}/android-aarch64/openblas/libopenblas.so" "${PREBUILT_DIR}/android-aarch64/faiss/"
 
-    # Copy headers to prebuilt/android-aarch64/faiss/include/
-    cp -r install/include/faiss/* "${PREBUILT_ANDROID_FAISS}/include/"
+    # Copy headers to prebuilt/include/faiss/ (shared across architectures)
+    copy_headers "install/include/faiss" "faiss"
 
     print_info "Faiss for Android built successfully"
 }
@@ -299,22 +372,21 @@ build_mnn_linux() {
     make -j$(nproc)
     make install
 
-    # Copy libraries to prebuilt/linux-x86_64/MNN/lib/
-    cp install/lib/libMNN.so "${PREBUILT_LINUX_MNN}/lib/"
-    cp install/lib/libMNN_Express.so "${PREBUILT_LINUX_MNN}/lib/"
+    # Copy libraries to prebuilt/linux-x86_64/MNN/
+    copy_libraries "install/lib" "linux-x86_64" "MNN"
 
     # Copy libllm.so if it exists (generated when MNN_BUILD_LLM=ON)
     # Check both in current directory and in install/lib
     if [ -f "libllm.so" ]; then
-        cp libllm.so "${PREBUILT_LINUX_MNN}/lib/"
-        print_info "Copied libllm.so to prebuilt/linux-x86_64/MNN/lib/"
+        cp libllm.so "${PREBUILT_DIR}/linux-x86_64/MNN/"
+        print_info "Copied libllm.so to prebuilt/linux-x86_64/MNN/"
     elif [ -f "install/lib/libllm.so" ]; then
-        cp install/lib/libllm.so "${PREBUILT_LINUX_MNN}/lib/"
-        print_info "Copied libllm.so to prebuilt/linux-x86_64/MNN/lib/"
+        cp install/lib/libllm.so "${PREBUILT_DIR}/linux-x86_64/MNN/"
+        print_info "Copied libllm.so to prebuilt/linux-x86_64/MNN/"
     fi
 
-    # Copy headers to prebuilt/linux-x86_64/MNN/include/
-    cp -r install/include/* "${PREBUILT_LINUX_MNN}/include/" 2>/dev/null || true
+    # Copy headers to prebuilt/include/MNN/ (shared across architectures)
+    copy_headers "install/include" "MNN"
 
     print_info "MNN for Linux built successfully"
 }
@@ -346,26 +418,23 @@ build_mnn_android() {
     make -j$(nproc)
     make install
 
-    # Copy libraries to prebuilt/android-aarch64/MNN/lib/
-    cp install/lib/libMNN_Express.so "${PREBUILT_ANDROID_MNN}/lib/"
+    # Copy libraries to prebuilt/android-aarch64/MNN/
+    copy_libraries "install/lib" "android-aarch64" "MNN"
 
     # Copy libMNN.so and libllm.so from build output directory
     # These are generated in OFF/arm64-v8a/ subdirectory
     if [ -f "OFF/arm64-v8a/libMNN.so" ]; then
-        cp OFF/arm64-v8a/libMNN.so "${PREBUILT_ANDROID_MNN}/lib/"
-        print_info "Copied libMNN.so to prebuilt/android-aarch64/MNN/lib/"
+        cp OFF/arm64-v8a/libMNN.so "${PREBUILT_DIR}/android-aarch64/MNN/"
+        print_info "Copied libMNN.so to prebuilt/android-aarch64/MNN/"
     fi
 
     if [ -f "OFF/arm64-v8a/libllm.so" ]; then
-        cp OFF/arm64-v8a/libllm.so "${PREBUILT_ANDROID_MNN}/lib/"
-        print_info "Copied libllm.so to prebuilt/android-aarch64/MNN/lib/"
+        cp OFF/arm64-v8a/libllm.so "${PREBUILT_DIR}/android-aarch64/MNN/"
+        print_info "Copied libllm.so to prebuilt/android-aarch64/MNN/"
     fi
 
-    # Copy headers to prebuilt/android-aarch64/MNN/include/
-    cp -r MNN "${PREBUILT_LINUX_MNN}/include/" 2>/dev/null || true
-    cp -r "${THIRD_PARTY_DIR}/MNN/tools/cv/include"/* "${PREBUILT_ANDROID_MNN}/include/" 2>/dev/null || true
-    cp -r "${THIRD_PARTY_DIR}/MNN/tools/audio/include"/* "${PREBUILT_ANDROID_MNN}/include/" 2>/dev/null || true
-    cp -r "${THIRD_PARTY_DIR}/MNN/transformers/llm/engine/include"/* "${PREBUILT_ANDROID_MNN}/include/" 2>/dev/null || true
+    # Copy headers to prebuilt/include/MNN/ (shared across architectures)
+    copy_headers "install/include" "MNN"
 
     print_info "MNN for Android built successfully"
 }
@@ -392,21 +461,19 @@ build_llama_linux() {
     make -j$(nproc)
     make install
 
-    # Copy libraries to prebuilt/linux-x86_64/llama/lib/
-    if [ -f "install/lib/libllama.so" ]; then
-        cp install/lib/libllama.so "${PREBUILT_LINUX_LLAMA}/lib/"
-        print_info "Copied libllama.so to prebuilt/linux-x86_64/llama/lib/"
-    fi
+    # Copy libraries to prebuilt/linux-x86_64/llama/
+    copy_libraries "install/lib" "linux-x86_64" "llama"
 
-    # Copy all other libraries (ggml, etc.)
-    if [ -d "install/lib" ]; then
-        cp install/lib/*.so* "${PREBUILT_LINUX_LLAMA}/lib/" 2>/dev/null || true
-    fi
+    # Copy headers to prebuilt/include/llama/ (shared across architectures)
+    copy_headers "install/include" "llama"
 
-    # Copy headers to prebuilt/linux-x86_64/llama/include/
-    cp -r install/include/* "${PREBUILT_LINUX_LLAMA}/include/" 2>/dev/null || true
-    cp -r "${THIRD_PARTY_DIR}/llama.cpp/include"/* "${PREBUILT_LINUX_LLAMA}/include/" 2>/dev/null || true
-    cp -r "${THIRD_PARTY_DIR}/llama.cpp/ggml/include"/* "${PREBUILT_LINUX_LLAMA}/include/" 2>/dev/null || true
+    # Also copy headers from source directories
+    if [ -d "${THIRD_PARTY_DIR}/llama.cpp/include" ]; then
+        copy_headers "${THIRD_PARTY_DIR}/llama.cpp/include" "llama"
+    fi
+    if [ -d "${THIRD_PARTY_DIR}/llama.cpp/ggml/include" ]; then
+        copy_headers "${THIRD_PARTY_DIR}/llama.cpp/ggml/include" "llama"
+    fi
 
     print_info "llama.cpp for Linux built successfully"
 }
@@ -433,21 +500,19 @@ build_llama_android() {
     make -j$(nproc)
     make install
 
-    # Copy libraries to prebuilt/android-aarch64/llama/lib/
-    if [ -f "install/lib/libllama.so" ]; then
-        cp install/lib/libllama.so "${PREBUILT_ANDROID_LLAMA}/lib/"
-        print_info "Copied libllama.so to prebuilt/android-aarch64/llama/lib/"
-    fi
+    # Copy libraries to prebuilt/android-aarch64/llama/
+    copy_libraries "install/lib" "android-aarch64" "llama"
 
-    # Copy all other libraries (ggml, etc.)
-    if [ -d "install/lib" ]; then
-        cp install/lib/*.so* "${PREBUILT_ANDROID_LLAMA}/lib/" 2>/dev/null || true
-    fi
+    # Copy headers to prebuilt/include/llama/ (shared across architectures)
+    copy_headers "install/include" "llama"
 
-    # Copy headers to prebuilt/android-aarch64/llama/include/
-    cp -r install/include/* "${PREBUILT_ANDROID_LLAMA}/include/" 2>/dev/null || true
-    cp -r "${THIRD_PARTY_DIR}/llama.cpp/include"/* "${PREBUILT_ANDROID_LLAMA}/include/" 2>/dev/null || true
-    cp -r "${THIRD_PARTY_DIR}/llama.cpp/ggml/include"/* "${PREBUILT_ANDROID_LLAMA}/include/" 2>/dev/null || true
+    # Also copy headers from source directories
+    if [ -d "${THIRD_PARTY_DIR}/llama.cpp/include" ]; then
+        copy_headers "${THIRD_PARTY_DIR}/llama.cpp/include" "llama"
+    fi
+    if [ -d "${THIRD_PARTY_DIR}/llama.cpp/ggml/include" ]; then
+        copy_headers "${THIRD_PARTY_DIR}/llama.cpp/ggml/include" "llama"
+    fi
 
     print_info "llama.cpp for Android built successfully"
 }
@@ -498,15 +563,15 @@ main() {
         print_info "Linux x86_64 libraries:"
         if [ "$BUILD_MNN" = true ]; then
             print_info "  MNN: ${PREBUILT_LINUX_MNN}/"
-            ls -lh "${PREBUILT_LINUX_MNN}/lib"/*.so 2>/dev/null || print_warn "No MNN libraries found"
+            ls -lh "${PREBUILT_LINUX_MNN}"/*.so 2>/dev/null || print_warn "No MNN libraries found"
         fi
         if [ "$BUILD_LLAMA" = true ]; then
             print_info "  llama.cpp: ${PREBUILT_LINUX_LLAMA}/"
-            ls -lh "${PREBUILT_LINUX_LLAMA}/lib"/*.so 2>/dev/null || print_warn "No llama libraries found"
+            ls -lh "${PREBUILT_LINUX_LLAMA}"/*.so 2>/dev/null || print_warn "No llama libraries found"
         fi
         if [ "$BUILD_FAISS" = true ]; then
             print_info "  Faiss: ${PREBUILT_LINUX_FAISS}/"
-            ls -lh "${PREBUILT_LINUX_FAISS}/lib"/*.so 2>/dev/null || print_warn "No Faiss libraries found"
+            ls -lh "${PREBUILT_LINUX_FAISS}"/*.so 2>/dev/null || print_warn "No Faiss libraries found"
         fi
     fi
 
@@ -514,15 +579,15 @@ main() {
         print_info "Android aarch64 libraries:"
         if [ "$BUILD_MNN" = true ]; then
             print_info "  MNN: ${PREBUILT_ANDROID_MNN}/"
-            ls -lh "${PREBUILT_ANDROID_MNN}/lib"/*.so 2>/dev/null || print_warn "No MNN libraries found"
+            ls -lh "${PREBUILT_ANDROID_MNN}"/*.so 2>/dev/null || print_warn "No MNN libraries found"
         fi
         if [ "$BUILD_LLAMA" = true ]; then
             print_info "  llama.cpp: ${PREBUILT_ANDROID_LLAMA}/"
-            ls -lh "${PREBUILT_ANDROID_LLAMA}/lib"/*.so 2>/dev/null || print_warn "No llama libraries found"
+            ls -lh "${PREBUILT_ANDROID_LLAMA}"/*.so 2>/dev/null || print_warn "No llama libraries found"
         fi
         if [ "$BUILD_FAISS" = true ]; then
             print_info "  Faiss: ${PREBUILT_ANDROID_FAISS}/"
-            ls -lh "${PREBUILT_ANDROID_FAISS}/lib"/*.so 2>/dev/null || print_warn "No Faiss libraries found"
+            ls -lh "${PREBUILT_ANDROID_FAISS}"/*.so 2>/dev/null || print_warn "No Faiss libraries found"
         fi
     fi
 }
