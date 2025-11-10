@@ -8,6 +8,7 @@
 
 #include "faiss/Index.h"
 #include "faiss/index_io.h"
+#include "faiss/MetricType.h"
 
 #include "vector_Index/IVectorIndex.hpp"
 
@@ -15,7 +16,10 @@ namespace mobile_rag {
 
 class FaissIndex : public IVectorIndex {
  public:
-  FaissIndex() = default;
+  // Default: Flat with Inner Product
+  FaissIndex();
+  // Customizable via FAISS factory description and metric
+  FaissIndex(std::string factory_desc, faiss::MetricType metric);
   ~FaissIndex() override = default;
 
   bool add_vectors(const std::vector<std::vector<float>>& vectors,
@@ -29,7 +33,12 @@ class FaissIndex : public IVectorIndex {
   bool load_index(const std::string& index_path) override;
 
  private:
+  bool ensure_index_created(int dimension);
+  bool train_if_needed(const std::vector<std::vector<float>>& vectors);
+
   std::unique_ptr<faiss::Index> index_;
+  std::string factory_desc_;
+  faiss::MetricType metric_ = faiss::METRIC_INNER_PRODUCT;
 };
 
 }  // namespace mobile_rag

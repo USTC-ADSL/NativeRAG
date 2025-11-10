@@ -27,6 +27,12 @@ class SqliteVectorDB : public IVectorDB {
 
   bool load_index(const std::string& index_path) override;
 
+  // Optional convenience APIs for storing/retrieving associated text metadata
+  bool add_texts(const std::vector<std::string>& texts,
+                 const std::vector<int64_t>& ids);
+  bool set_text_for_id(int64_t id, const std::string& text);
+  std::string get_text_for_id(int64_t id) const;
+
  private:
   bool initialize_schema();
 
