@@ -3,11 +3,15 @@
 #include <iostream>
 #include <memory>
 #include <vector>
+#include <fstream>
+#include <string>
 
 #include "dataset/TrivialQADataset.hpp"
 #include "dataset/VectorDataGenerator.hpp"
 #include "vector_Index/FaissIndex.hpp"
+#include "vector_db/SqliteVectorDB.hpp"
 #include "TestBase.hpp"
+#include "faiss/MetricType.h"
 
 using namespace mobile_rag;
 using namespace mobile_rag::testing;
@@ -28,50 +32,37 @@ class VectorDBTest : public TestBase {
   std::shared_ptr<IVectorIndex> index_;
   std::vector<std::vector<float>> vectors_;
   std::vector<int64_t> vector_ids_;
+  std::vector<std::string> metadata_;
+  std::shared_ptr<SqliteVectorDB> sqlite_;
+  std::string faiss_factory_ = "Flat";
+  faiss::MetricType faiss_metric_ = faiss::METRIC_INNER_PRODUCT;
 
  public:
   bool test_load_dataset() {
-    print_test_info("Test 1: Load TrivialQA Dataset");
-    
-    bool success = load_dataset("dataset/data/val00-100.json");
-    
-    if (success) {
-      auto samples = get_samples();
-      std::cout << "Loaded " << samples.size() << " samples\n";
-      if (!samples.empty()) {
-        std::cout << "First sample query: " << samples[0].query.substr(0, 50)
-                  << "...\n";
-        std::cout << "First sample documents: " << samples[0].documents.size()
-                  << '\n';
-      }
-    }
-    
-    print_result("Load dataset", success);
+    print_test_info("Test 1: Check Pre-generated Embeddings");
+    const std::string vectors_file = std::string(PROJECT_ROOT_DIR) + "/dataset/data/qwen3_embeddings/vectors.bin";
+    const std::string metadata_file = std::string(PROJECT_ROOT_DIR) + "/dataset/data/qwen3_embeddings/metadata.txt";
+    std::ifstream fv(vectors_file, std::ios::binary);
+    std::ifstream fm(metadata_file);
+    bool success = fv.good() && fm.good();
+    print_result("Embeddings exist", success);
     return success;
   }
 
   bool test_generate_vectors() {
-    print_test_info("Test 2: Generate Vectors from Dataset");
-    
-    if (!dataset_) {
-      print_result("Dataset exists", false);
-      return false;
-    }
-
-    // 生成向量
-    bool success = VectorDataGenerator::generate_from_dataset(
-        dataset_, "/tmp/test_vectors_integrated", 384);
-
+    print_test_info("Test 2: Load Pre-generated Vectors");
+    const std::string vectors_file = std::string(PROJECT_ROOT_DIR) + "/dataset/data/qwen3_embeddings/vectors.bin";
+    const std::string metadata_file = std::string(PROJECT_ROOT_DIR) + "/dataset/data/qwen3_embeddings/metadata.txt";
+    vectors_ = VectorDataGenerator::load_vectors(vectors_file);
+    metadata_ = VectorDataGenerator::load_metadata(metadata_file);
+    bool success = !vectors_.empty() && vectors_.size() == metadata_.size();
     if (success) {
-      // 加载生成的向量
-      vectors_ = VectorDataGenerator::load_vectors("/tmp/test_vectors_integrated/vectors.bin");
-      std::cout << "Generated " << vectors_.size() << " vectors\n";
-      if (!vectors_.empty()) {
-        std::cout << "Vector dimension: " << vectors_[0].size() << '\n';
-      }
+      std::cout << "Loaded " << vectors_.size() << " vectors, dim=" << vectors_[0].size() << '\n';
+      std::cout << "Loaded " << metadata_.size() << " metadata entries\n";
+    } else {
+      std::cout << "Vectors size: " << vectors_.size() << ", metadata size: " << metadata_.size() << '\n';
     }
-
-    print_result("Generate vectors", success);
+    print_result("Load vectors", success);
     return success;
   }
 
@@ -83,7 +74,20 @@ class VectorDBTest : public TestBase {
       return false;
     }
 
-    index_ = std::make_shared<FaissIndex>();
+    // Read FAISS config from environment variables (optional)
+    if (const char* f = std::getenv("FAISS_FACTORY")) {
+      faiss_factory_ = f;
+    }
+    if (const char* m = std::getenv("FAISS_METRIC")) {
+      std::string ms = m;
+      if (ms == "IP" || ms == "COSINE" || ms == "COS") faiss_metric_ = faiss::METRIC_INNER_PRODUCT;
+      else if (ms == "L2" || ms == "EUCLIDEAN") faiss_metric_ = faiss::METRIC_L2;
+    }
+    std::cout << "[Config] FAISS factory = " << faiss_factory_
+              << ", metric = " << (faiss_metric_ == faiss::METRIC_L2 ? "L2" : "IP") << '\n';
+
+    index_ = std::make_shared<FaissIndex>(faiss_factory_, faiss_metric_);
+    sqlite_ = std::make_shared<SqliteVectorDB>("/tmp/test_texts.db");
     
     // 生成 ID
     vector_ids_.clear();
@@ -91,10 +95,22 @@ class VectorDBTest : public TestBase {
       vector_ids_.push_back(i);
     }
 
+    // 1) 添加向量到 FAISS
     bool success = index_->add_vectors(vectors_, vector_ids_);
 
     if (success) {
       std::cout << "Added " << vectors_.size() << " vectors to index\n";
+    }
+
+    // 2) 写入 id->text 映射到 SQLite
+    if (success) {
+      if (!metadata_.empty() && metadata_.size() == vectors_.size()) {
+        bool kv_ok = sqlite_->add_texts(metadata_, vector_ids_);
+        success = success && kv_ok;
+        std::cout << "Inserted " << metadata_.size() << " id->text into SQLite (/tmp/test_texts.db)\n";
+      } else {
+        std::cout << "Skip SQLite insert: metadata missing or size mismatch\n";
+      }
     }
 
     print_result("Add vectors to index", success);
@@ -122,6 +138,17 @@ class VectorDBTest : public TestBase {
       for (size_t i = 0; i < results.size() && i < 5; ++i) {
         std::cout << "  " << (i + 1) << ". ID=" << results[i].first
                   << ", Similarity=" << results[i].second << '\n';
+      }
+      // 使用 SQLite 通过 ID 取回文本，验证并行使用
+      if (sqlite_) {
+        int show = std::min<int>(3, static_cast<int>(results.size()));
+        for (int i = 0; i < show; ++i) {
+          auto id = results[static_cast<size_t>(i)].first;
+          auto text = sqlite_->get_text_for_id(id);
+          std::cout << "  -> Text[" << id << "]: "
+                    << (text.size() > 60 ? text.substr(0, 60) + "..." : text) << '\n';
+          success = success && !text.empty();
+        }
       }
     }
 

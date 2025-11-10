@@ -93,6 +93,8 @@ target_link_libraries(test_vectordb
         dataset_lib
 )
 
+target_compile_definitions(test_vectordb PRIVATE PROJECT_ROOT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/..")
+
 # Core RAG library (implementation files)
 add_library(rag_core STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/RAGPipeline.cpp
@@ -125,6 +127,15 @@ target_link_libraries(rag_core PUBLIC
     ${FAISS_LIBRARY}
     ${LLAMA_LIBRARY}
 )
+
+# Link SQLite for SqliteVectorDB used inside rag_core
+find_package(SQLite3 REQUIRED)
+if (TARGET SQLite::SQLite3)
+    target_link_libraries(rag_core PUBLIC SQLite::SQLite3)
+else()
+    target_link_libraries(rag_core PUBLIC ${SQLite3_LIBRARIES})
+    target_include_directories(rag_core PUBLIC ${SQLite3_INCLUDE_DIRS})
+endif()
 
 # RAGPipelineWithDataset library
 add_library(rag_pipeline_dataset STATIC
@@ -193,6 +204,8 @@ target_link_libraries(test_vectordb_integrated PRIVATE
     dataset_lib
     rag_core
 )
+
+target_compile_definitions(test_vectordb_integrated PRIVATE PROJECT_ROOT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/..")
 
 # RAG Pipeline integration tests
 add_executable(test_rag_integration
