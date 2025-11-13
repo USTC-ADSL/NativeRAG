@@ -2,11 +2,9 @@
 #include <memory>
 #include <string>
 #include <vector>
-#include <cstdio>
-#include <unistd.h>
-#include <fcntl.h>
+#include <iomanip>
 
-#include "RAGPipeline.hpp"
+#include "RAGPipelineWithDataset.hpp"
 #include "cli/CommandLineArgs.hpp"
 
 #include "loader/TextFileLoader.hpp"
@@ -14,32 +12,7 @@
 #include "vector_Index/FaissIndex.hpp"
 #include "vector_db/SqliteVectorDB.hpp"
 #include "llm/LLMFactory.hpp"
-
-// Helper function to suppress MNN startup messages
-void suppress_mnn_startup_output() {
-  // Redirect stdout to /dev/null temporarily during MNN initialization
-  // This suppresses CPU detection messages like "CPU Group: [...]"
-  fflush(stdout);
-  int saved_stdout = dup(STDOUT_FILENO);
-  int devnull = open("/dev/null", O_WRONLY);
-  dup2(devnull, STDOUT_FILENO);
-  close(devnull);
-
-  // Store the saved stdout for later restoration
-  // We'll restore it after the first model load
-  static int g_saved_stdout = saved_stdout;
-}
-
-void restore_stdout() {
-  // This will be called after MNN initialization
-  static int g_saved_stdout = -1;
-  if (g_saved_stdout != -1) {
-    fflush(stdout);
-    dup2(g_saved_stdout, STDOUT_FILENO);
-    close(g_saved_stdout);
-    g_saved_stdout = -1;
-  }
-}
+#include "dataset/TrivialQADataset.hpp"
 
 int main(int argc, char** argv) {
   using namespace mobile_rag;
@@ -92,24 +65,36 @@ int main(int argc, char** argv) {
     }
 
     // Create pipeline without LLM for offline phase
-    RAGPipeline pipeline(loader, embedder, index, nullptr, sqlite_db);
-    if (config.data_source == CommandLineArgs::Config::DataSource::DATASET) {
-      std::cerr << "[ERROR] Dataset mode is not supported in this binary. "
-                   "Use main_with_dataset instead."
-                << '\n';
-      return 1;
-    }
-
+    RAGPipelineWithDataset pipeline(loader, embedder, index, nullptr, sqlite_db);
     // ========== 离线阶段 (Offline/Indexing Phase) ==========
     if (config.verbose) {
       std::cout << "[INFO] === OFFLINE PHASE: Building Index ===\n"
-                << "[INFO] Input file: " << config.input_file << '\n'
                 << "[INFO] Index path: " << config.index_path << '\n';
     }
 
-    // Step 1-3: Load documents, embed, and build index
-    pipeline.build_index_from_file(config.input_file);
-    std::cout << "✓ Index built from: " << config.input_file << '\n';
+    if (config.data_source == CommandLineArgs::Config::DataSource::DATASET) {
+      // Load dataset
+      auto dataset = std::make_shared<TrivialQADataset>();
+      if (!dataset->load(config.input_file)) {
+        std::cerr << "[ERROR] Failed to load dataset from: " << config.input_file << '\n';
+        return 1;
+      }
+
+      if (config.verbose) {
+        std::cout << "[INFO] Dataset loaded with " << dataset->size() << " samples\n";
+      }
+
+      // Step 1-3: Build index from dataset
+      pipeline.build_index_from_dataset(dataset, true);
+      std::cout << "✓ Index built from dataset: " << config.input_file << '\n';
+    } else {
+      if (config.verbose) {
+        std::cout << "[INFO] Building index from text source: " << config.input_file << '\n';
+      }
+      // Step 1-3: Build index from text file
+      pipeline.build_index_from_file(config.input_file);
+      std::cout << "✓ Index built from: " << config.input_file << '\n';
+    }
 
     // Save index to disk
     if (config.save_index) {
@@ -123,6 +108,7 @@ int main(int argc, char** argv) {
       std::cout << "✓ Index saved to: " << config.index_path << '\n';
     }
     return 0;
+
   } else if (config.command == CommandLineArgs::Command::QUERY) {
     // ========== 查询阶段 (Online/Query Phase) ==========
     // Only need: embedder, index, llm
@@ -155,7 +141,7 @@ int main(int argc, char** argv) {
     }
 
     // Create pipeline without loader for query phase
-    RAGPipeline pipeline(nullptr, embedder, index, llm, sqlite_db);
+    RAGPipelineWithDataset pipeline(nullptr, embedder, index, llm, sqlite_db);
 
     if (config.verbose) {
       std::cout << "[INFO] === ONLINE PHASE: Query Processing ===\n"
@@ -182,6 +168,7 @@ int main(int argc, char** argv) {
     std::string answer = pipeline.answer_query(config.query);
     std::cout << answer << '\n';
     return 0;
+
   } else if (config.command == CommandLineArgs::Command::INTERACTIVE) {
     // ========== 查询阶段 (Online/Query Phase) ==========
     // Only need: embedder, index, llm
@@ -214,10 +201,10 @@ int main(int argc, char** argv) {
     }
 
     // Create pipeline without loader for interactive phase
-    RAGPipeline pipeline(nullptr, embedder, index, llm, sqlite_db);
+    RAGPipelineWithDataset pipeline(nullptr, embedder, index, llm, sqlite_db);
 
     std::cout << "╔════════════════════════════════════════════════════════════╗\n"
-              << "║         NativeRAG - Interactive Mode                       ║\n"
+              << "║    NativeRAG with Dataset - Interactive Mode              ║\n"
               << "╚════════════════════════════════════════════════════════════╝\n\n";
 
     // Load index from disk
@@ -258,4 +245,3 @@ int main(int argc, char** argv) {
 
   return 1;
 }
-
