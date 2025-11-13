@@ -40,6 +40,14 @@ else()
   message(STATUS "Target platform: Linux x86_64")
 endif()
 
+# ----------------------------------------------------------------------------
+# RPATH handling
+# ----------------------------------------------------------------------------
+# Make binaries prefer relative paths at build/install time and record useful rpaths
+set(CMAKE_SKIP_BUILD_RPATH FALSE)
+set(CMAKE_BUILD_RPATH_USE_ORIGIN TRUE)
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
+
 # ============================================================================
 # 辅助函数：查找库（支持 prebuilt 和 third_party 两种方式）
 # ============================================================================
@@ -77,6 +85,8 @@ file(GLOB_RECURSE MOBILERAG_SOURCES
 )
 # Exclude llm sources by default; add per-backend below
 list(FILTER MOBILERAG_SOURCES EXCLUDE REGEX ".*/src/llm/.*\\.cpp$")
+# Exclude main_with_dataset.cpp from the main executable
+list(FILTER MOBILERAG_SOURCES EXCLUDE REGEX ".*/src/main_with_dataset\\.cpp$")
 
 # Add CLI module sources
 file(GLOB CLI_SOURCES
@@ -332,6 +342,159 @@ elseif (LLM_BACKEND STREQUAL "LlamaCpp")
   )
 else()
   message(FATAL_ERROR "Unsupported LLM_BACKEND='${LLM_BACKEND}'. Use: MNN, MLLM, or LlamaCpp")
+endif()
+
+# Set RPATH for mobile_rag_cli when using prebuilt libraries
+if(USE_PREBUILT)
+  # Use absolute prebuilt paths and also portable $ORIGIN-based paths for dev runs
+  set(_PREBUILT_RPATHS
+      "${PREBUILT_DIR}/${TARGET_PLATFORM}/MNN"
+      "${PREBUILT_DIR}/${TARGET_PLATFORM}/faiss"
+      "${PREBUILT_DIR}/${TARGET_PLATFORM}/llama"
+      "\$ORIGIN/../prebuilt/${TARGET_PLATFORM}/MNN"
+      "\$ORIGIN/../prebuilt/${TARGET_PLATFORM}/faiss"
+      "\$ORIGIN/../prebuilt/${TARGET_PLATFORM}/llama"
+  )
+  set_target_properties(mobile_rag_cli PROPERTIES
+    BUILD_RPATH "${_PREBUILT_RPATHS}"
+    INSTALL_RPATH "${_PREBUILT_RPATHS}"
+  )
+endif()
+
+# ============================================================================
+# 第二个可执行文件：mobile_rag_dataset (使用 RAGPipelineWithDataset)
+# ============================================================================
+# Collect sources for the dataset version (excluding main.cpp and main_with_dataset.cpp)
+file(GLOB_RECURSE MOBILERAG_DATASET_SOURCES
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
+)
+# Exclude llm sources by default; add per-backend below
+list(FILTER MOBILERAG_DATASET_SOURCES EXCLUDE REGEX ".*/src/llm/.*\\.cpp$")
+# Exclude main.cpp from the dataset executable
+list(FILTER MOBILERAG_DATASET_SOURCES EXCLUDE REGEX ".*/src/main\\.cpp$")
+
+# Add CLI module sources
+list(APPEND MOBILERAG_DATASET_SOURCES ${CLI_SOURCES})
+
+# Add dataset sources
+list(APPEND MOBILERAG_DATASET_SOURCES
+  "${CMAKE_CURRENT_SOURCE_DIR}/dataset/src/TrivialQADataset.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/dataset/src/VectorDataGenerator.cpp"
+)
+
+# Add main_with_dataset.cpp
+list(APPEND MOBILERAG_DATASET_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/main_with_dataset.cpp")
+
+add_executable(mobile_rag_dataset ${MOBILERAG_DATASET_SOURCES})
+
+target_include_directories(mobile_rag_dataset
+  PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/dataset/include"
+)
+
+# Link SQLite3 for mobile_rag_dataset
+if (TARGET SQLite::SQLite3)
+  target_link_libraries(mobile_rag_dataset PRIVATE SQLite::SQLite3)
+else()
+  target_link_libraries(mobile_rag_dataset PRIVATE ${SQLite3_LIBRARIES})
+  target_include_directories(mobile_rag_dataset PRIVATE ${SQLite3_INCLUDE_DIRS})
+endif()
+
+# Copy all the same library configurations from mobile_rag_cli to mobile_rag_dataset
+# Vector Index
+if (VECTOR_INDEX STREQUAL "Faiss")
+  target_compile_definitions(mobile_rag_dataset PRIVATE VECTOR_INDEX_FAISS=1)
+  if(USE_PREBUILT)
+    target_include_directories(mobile_rag_dataset SYSTEM PRIVATE "${PREBUILT_DIR}/include")
+    target_link_libraries(mobile_rag_dataset PRIVATE ${FAISS_LIBRARY})
+    if(TARGET_PLATFORM STREQUAL "android-aarch64" AND OPENBLAS_LIBRARY)
+      target_link_libraries(mobile_rag_dataset PRIVATE ${OPENBLAS_LIBRARY})
+    endif()
+  else()
+    target_include_directories(mobile_rag_dataset PRIVATE "${THIRD_PARTY_DIR}/faiss")
+    target_link_libraries(mobile_rag_dataset PRIVATE ${FAISS_LIBRARY})
+  endif()
+endif()
+
+# LLM Backend
+if (LLM_BACKEND STREQUAL "MNN")
+  target_compile_definitions(mobile_rag_dataset PRIVATE LLM_BACKEND_MNN=1)
+  target_include_directories(mobile_rag_dataset SYSTEM PRIVATE "${PREBUILT_DIR}/include/MNN")
+  target_link_libraries(mobile_rag_dataset PRIVATE ${MNN_LIBRARY} ${MNN_EXPRESS_LIBRARY} ${MNN_LLM_LIBRARY})
+  target_sources(mobile_rag_dataset PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/llm/MNNModel.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/llm/LLMFactory_MNN.cpp"
+  )
+elseif (LLM_BACKEND STREQUAL "MLLM")
+  target_compile_definitions(mobile_rag_dataset PRIVATE LLM_BACKEND_MLLM=1)
+  target_include_directories(mobile_rag_dataset SYSTEM PRIVATE "${PREBUILT_DIR}/include/MLLM")
+  target_link_libraries(mobile_rag_dataset PRIVATE ${MLLM_LIBRARY})
+  target_sources(mobile_rag_dataset PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/llm/MllmModel.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/llm/LLMFactory_MLLM.cpp"
+  )
+elseif (LLM_BACKEND STREQUAL "LlamaCpp")
+  target_compile_definitions(mobile_rag_dataset PRIVATE LLM_BACKEND_LLAMA=1)
+  target_include_directories(mobile_rag_dataset SYSTEM PRIVATE "${PREBUILT_DIR}/include/llama")
+  target_link_libraries(mobile_rag_dataset PRIVATE ${LLAMA_LIBRARY})
+  if (LLAMA_INCLUDE_DIR)
+    target_include_directories(mobile_rag_dataset PRIVATE "${LLAMA_INCLUDE_DIR}")
+  endif()
+  target_include_directories(mobile_rag_dataset PRIVATE "${THIRD_PARTY_DIR}/llama.cpp/include")
+  target_include_directories(mobile_rag_dataset PRIVATE "${THIRD_PARTY_DIR}/llama.cpp/ggml/include")
+  target_sources(mobile_rag_dataset PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/llm/LlamaCppModel.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/llm/LLMFactory_Llama.cpp"
+  )
+endif()
+
+# Set RPATH for mobile_rag_dataset
+if(USE_PREBUILT)
+  # Use absolute prebuilt paths and also portable $ORIGIN-based paths for dev runs
+  set(_PREBUILT_RPATHS
+      "${PREBUILT_DIR}/${TARGET_PLATFORM}/MNN"
+      "${PREBUILT_DIR}/${TARGET_PLATFORM}/faiss"
+      "${PREBUILT_DIR}/${TARGET_PLATFORM}/llama"
+      "\$ORIGIN/../prebuilt/${TARGET_PLATFORM}/MNN"
+      "\$ORIGIN/../prebuilt/${TARGET_PLATFORM}/faiss"
+      "\$ORIGIN/../prebuilt/${TARGET_PLATFORM}/llama"
+  )
+  set_target_properties(mobile_rag_dataset PROPERTIES
+    BUILD_RPATH "${_PREBUILT_RPATHS}"
+    INSTALL_RPATH "${_PREBUILT_RPATHS}"
+  )
+endif()
+
+# ----------------------------------------------------------------------------
+# 修正 prebuilt 下 MNN 系列 .so 的 RUNPATH，避免解析到 third_party 路径
+# ----------------------------------------------------------------------------
+if(USE_PREBUILT)
+  find_program(PATCHELF_EXECUTABLE NAMES patchelf)
+  if(PATCHELF_EXECUTABLE)
+    set(MNN_PREBUILT_DIR "${PREBUILT_DIR}/${TARGET_PLATFORM}/MNN")
+    set(_MNN_LIB_CANDIDATES
+      "${MNN_PREBUILT_DIR}/libllm.so"
+      "${MNN_PREBUILT_DIR}/libMNNAudio.so"
+      "${MNN_PREBUILT_DIR}/libMNNOpenCV.so"
+      "${MNN_PREBUILT_DIR}/libMNN_Express.so"
+      "${MNN_PREBUILT_DIR}/libMNN.so"
+    )
+    add_custom_target(patch_prebuilt_mnn_rpath ALL
+      COMMENT "Patching RUNPATH of prebuilt MNN libraries to use $ORIGIN"
+    )
+    foreach(_lib IN LISTS _MNN_LIB_CANDIDATES)
+      if(EXISTS "${_lib}")
+        add_custom_command(TARGET patch_prebuilt_mnn_rpath POST_BUILD
+          COMMAND "${PATCHELF_EXECUTABLE}" --set-rpath "\$ORIGIN" "${_lib}"
+          VERBATIM
+          COMMENT "patchelf --set-rpath $ORIGIN ${_lib}"
+        )
+      endif()
+    endforeach()
+  else()
+    message(STATUS "patchelf not found; skipping RUNPATH patch for prebuilt MNN libraries")
+  endif()
 endif()
 
 # 测试支持

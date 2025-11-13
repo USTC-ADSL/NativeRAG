@@ -155,6 +155,94 @@ make -j$(nproc)
 ctest --output-on-failure
 ```
 
+### 3.4 两阶段 Pipeline 使用指南
+
+NativeRAG 采用**两阶段设计**，将 RAG 工作流分为离线阶段和查询阶段，支持索引的持久化和复用。
+
+#### **阶段一：离线构建 (Offline Indexing Phase)**
+
+离线阶段执行 Step 1-3，构建并保存索引到磁盘。
+
+```bash
+# 从文本文件构建索引
+./mobile_rag_cli --build \
+  --text-path documents.txt \
+  --llm-model ./models/qwen/config.json \
+  --embedding-model ./models/emb/config.json \
+  --index-path ./faiss_index.bin \
+  --verbose
+
+# 从数据集构建索引
+./mobile_rag_dataset --build \
+  --dataset-path dataset/data.json \
+  --llm-model ./models/qwen/config.json \
+  --embedding-model ./models/emb/config.json \
+  --index-path ./faiss_index.bin \
+  --verbose
+```
+
+**输出：**
+- `./faiss_index.bin` - 持久化的 Faiss 向量索引
+- 内存中的元数据映射（ChunkID -> ChunkText）
+
+#### **阶段二：在线查询 (Online Query Phase)**
+
+查询阶段执行 Step 4-7，从磁盘加载索引并处理用户查询。
+
+```bash
+# 单次查询
+./mobile_rag_cli --query "What is AI?" \
+  --llm-model ./models/qwen/config.json \
+  --embedding-model ./models/emb/config.json \
+  --index-path ./faiss_index.bin \
+  --verbose
+
+# 交互式查询
+./mobile_rag_cli --interactive \
+  --llm-model ./models/qwen/config.json \
+  --embedding-model ./models/emb/config.json \
+  --index-path ./faiss_index.bin \
+  --verbose
+```
+
+#### **关键参数说明**
+
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `--index-path <path>` | 索引文件保存/加载路径 | `./faiss_index.bin` |
+| `--save-index` | 构建后是否保存索引（默认启用） | 启用 |
+| `--no-save-index` | 禁用索引保存 | - |
+| `--load-index` | 查询前是否加载索引（默认启用） | 启用 |
+| `--no-load-index` | 禁用索引加载 | - |
+
+#### **工作流示例**
+
+```bash
+# 1. 离线阶段：构建索引（一次性）
+./mobile_rag_cli --build \
+  --text-path documents.txt \
+  --llm-model ./models/qwen/config.json \
+  --embedding-model ./models/emb/config.json \
+  --index-path ./my_index.bin
+
+# 2. 查询阶段：多次查询（复用索引）
+./mobile_rag_cli --query "Question 1?" \
+  --llm-model ./models/qwen/config.json \
+  --embedding-model ./models/emb/config.json \
+  --index-path ./my_index.bin
+
+./mobile_rag_cli --query "Question 2?" \
+  --llm-model ./models/qwen/config.json \
+  --embedding-model ./models/emb/config.json \
+  --index-path ./my_index.bin
+
+# 3. 交互式查询（复用索引）
+./mobile_rag_cli --interactive \
+  --llm-model ./models/qwen/config.json \
+  --embedding-model ./models/emb/config.json \
+  --index-path ./my_index.bin
+```
+
 ## 4. ⚙️ RAG 工作流 (Workflow)
 
 整个工作流分为“构建”和“查询”两个阶段：
