@@ -9,6 +9,9 @@
 
 namespace mobile_rag {
 
+// Forward declaration
+class SqliteVectorDB;
+
 /**
  * RAGPipelineWithDataset 扩展了 RAGPipeline，支持从数据集加载数据
  * 用于测试和评估各个 Group 的功能
@@ -18,7 +21,8 @@ class RAGPipelineWithDataset : public RAGPipeline {
   RAGPipelineWithDataset(std::shared_ptr<IDocumentLoader> loader,
                          std::shared_ptr<IEmbeddingModel> embedder,
                          std::shared_ptr<IVectorIndex> index,
-                         std::shared_ptr<ILargeLanguageModel> llm);
+                         std::shared_ptr<ILargeLanguageModel> llm,
+                         std::shared_ptr<SqliteVectorDB> sqlite_db = nullptr);
 
   /**
    * 从数据集加载文档并构建索引
