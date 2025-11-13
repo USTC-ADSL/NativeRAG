@@ -385,6 +385,16 @@ build_mnn_linux() {
         print_info "Copied libllm.so to prebuilt/linux-x86_64/MNN/"
     fi
 
+    if [ -f "tools/cv/libMNNOpenCV.so" ]; then
+        cp tools/cv/libMNNOpenCV.so "${PREBUILT_DIR}/linux-x86_64/MNN/"
+        print_info "Copied libMNNOpenCV.so to prebuilt/linux-x86_64/MNN/"
+    fi
+
+    if [ -f "tools/audio/libMNNAudio.so" ]; then
+        cp tools/audio/libMNNAudio.so "${PREBUILT_DIR}/linux-x86_64/MNN/"
+        print_info "Copied libMNNAudio.so to prebuilt/linux-x86_64/MNN/"
+    fi
+
     # Copy headers to prebuilt/include/MNN/ (shared across architectures)
     copy_headers "install/include" "MNN"
 
@@ -431,6 +441,16 @@ build_mnn_android() {
     if [ -f "OFF/arm64-v8a/libllm.so" ]; then
         cp OFF/arm64-v8a/libllm.so "${PREBUILT_DIR}/android-aarch64/MNN/"
         print_info "Copied libllm.so to prebuilt/android-aarch64/MNN/"
+    fi
+
+    if [ -f "tools/audio/OFF/arm64-v8a/libMNNAudio.so" ]; then
+        cp tools/audio/OFF/arm64-v8a/libMNNAudio.so "${PREBUILT_DIR}/android-aarch64/MNN/"
+        print_info "Copied libMNNAudio.so to prebuilt/android-aarch64/MNN/"
+    fi
+    
+    if [ -f "tools/cv/OFF/arm64-v8a/libMNNOpenCV.so" ]; then
+        cp tools/cv/OFF/arm64-v8a/libMNNOpenCV.so "${PREBUILT_DIR}/android-aarch64/MNN/"
+        print_info "Copied libMNNOpenCV.so to prebuilt/android-aarch64/MNN/"
     fi
 
     # Copy headers to prebuilt/include/MNN/ (shared across architectures)
