@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-#include "MNN/Interpreter.hpp"
+#include "llm/llm.hpp"
 
 #include "embedding/IEmbeddingModel.hpp"
 
@@ -23,8 +23,7 @@ class MNNEmbedding : public IEmbeddingModel {
       const std::vector<std::string>& texts) override;
 
  private:
-  std::shared_ptr<MNN::Interpreter> interpreter_;
-  MNN::Session* session_ = nullptr;
+  std::unique_ptr<MNN::Transformer::Embedding> embedding_;
   int embed_dim_ = 384;
 };
 
