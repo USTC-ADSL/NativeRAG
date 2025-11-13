@@ -78,6 +78,12 @@ file(GLOB_RECURSE MOBILERAG_SOURCES
 # Exclude llm sources by default; add per-backend below
 list(FILTER MOBILERAG_SOURCES EXCLUDE REGEX ".*/src/llm/.*\\.cpp$")
 
+# Add CLI module sources
+file(GLOB CLI_SOURCES
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/cli/*.cpp"
+)
+list(APPEND MOBILERAG_SOURCES ${CLI_SOURCES})
+
 add_executable(mobile_rag_cli ${MOBILERAG_SOURCES})
 
 target_include_directories(mobile_rag_cli
