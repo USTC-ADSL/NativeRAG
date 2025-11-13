@@ -8,9 +8,10 @@ RAGPipelineWithDataset::RAGPipelineWithDataset(
     std::shared_ptr<IDocumentLoader> loader,
     std::shared_ptr<IEmbeddingModel> embedder,
     std::shared_ptr<IVectorIndex> index,
-    std::shared_ptr<ILargeLanguageModel> llm)
+    std::shared_ptr<ILargeLanguageModel> llm,
+    std::shared_ptr<SqliteVectorDB> sqlite_db)
     : RAGPipeline(std::move(loader), std::move(embedder), std::move(index),
-                  std::move(llm)) {}
+                  std::move(llm), std::move(sqlite_db)) {}
 
 void RAGPipelineWithDataset::build_index_from_dataset(
     const std::shared_ptr<IDataset>& dataset, bool use_documents) {
