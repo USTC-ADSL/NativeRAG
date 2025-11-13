@@ -25,6 +25,7 @@ class MNNEmbedding : public IEmbeddingModel {
  private:
   std::unique_ptr<MNN::Transformer::Embedding> embedding_;
   int embed_dim_ = 384;
+  bool model_loaded_ = false;
 };
 
 }  // namespace mobile_rag
