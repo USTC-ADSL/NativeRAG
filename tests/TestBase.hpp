@@ -7,6 +7,8 @@
 
 #include "dataset/IDataset.hpp"
 #include "dataset/TrivialQADataset.hpp"
+#include "llm/ILargeLanguageModel.hpp"
+#include "llm/LLMFactory.hpp"
 
 namespace mobile_rag {
 namespace testing {
@@ -26,14 +28,35 @@ class TestBase {
    */
   bool load_dataset(const std::string& dataset_path) {
     dataset_ = std::make_shared<TrivialQADataset>();
-    if (!dataset_->load(dataset_path)) {
-      std::cerr << "[TestBase] Failed to load dataset: " << dataset_path
-                << '\n';
-      return false;
+
+    // Try the provided path first
+    if (dataset_->load(dataset_path)) {
+      std::cout << "[TestBase] Loaded dataset with " << dataset_->size()
+                << " samples" << '\n';
+      return true;
     }
-    std::cout << "[TestBase] Loaded dataset with " << dataset_->size()
-              << " samples" << '\n';
-    return true;
+
+    // Try alternative paths
+    std::vector<std::string> alternative_paths = {
+        "../" + dataset_path,
+        "../../" + dataset_path,
+        // Handle the case where dataset_path is "dataset/data/val00-100.json"
+        // but the actual file is in "dataset/data/trival_QA/val00-100.json"
+        "dataset/data/trival_QA/val00-100.json",
+        "../dataset/data/trival_QA/val00-100.json",
+        "../../dataset/data/trival_QA/val00-100.json",
+    };
+
+    for (const auto& alt_path : alternative_paths) {
+      if (dataset_->load(alt_path)) {
+        std::cout << "[TestBase] Loaded dataset with " << dataset_->size()
+                  << " samples from: " << alt_path << '\n';
+        return true;
+      }
+    }
+
+    std::cerr << "[TestBase] Failed to load dataset from any path" << '\n';
+    return false;
   }
 
   /**
@@ -77,6 +100,36 @@ class TestBase {
     } else {
       std::cout << "✗ " << test_name << " FAILED\n";
     }
+  }
+
+  /**
+   * 创建并加载LLM模型
+   * @return 加载成功返回LLM实例，失败返回nullptr
+   */
+  std::shared_ptr<ILargeLanguageModel> create_llm() {
+    auto llm = mobile_rag::create_llm();
+    if (!llm) {
+      std::cerr << "[TestBase] Failed to create LLM instance\n";
+      return nullptr;
+    }
+
+    // Try multiple possible paths for the model config
+    // Order matters: try the most likely paths first to avoid unnecessary attempts
+    std::vector<std::string> possible_paths = {
+        "../models/Qwen3-0.6B/config.json",      // When run from build directory (most common)
+        "models/Qwen3-0.6B/config.json",         // When run from project root
+        "config.json",                           // When run from model directory
+    };
+
+    for (const auto& model_path : possible_paths) {
+      if (llm->load_model(model_path)) {
+        std::cout << "[TestBase] Model loaded successfully from: " << model_path << '\n';
+        return llm;
+      }
+    }
+
+    std::cerr << "[TestBase] Failed to load model from any of the possible paths\n";
+    return nullptr;
   }
 
  protected:

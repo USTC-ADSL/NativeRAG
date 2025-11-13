@@ -34,6 +34,17 @@ bool TrivialQADataset::load(const std::string& file_path) {
             auto questions = data["questions"].get<std::vector<std::string>>();
             auto answers_data = data["answers"];
 
+            // Limit the number of documents to avoid huge prompts
+            // Use only the first MAX_DOCS_PER_SAMPLE documents
+            const size_t MAX_DOCS_PER_SAMPLE = 1;
+            std::vector<std::string> limited_docs;
+            if (documents_.size() > MAX_DOCS_PER_SAMPLE) {
+                limited_docs.assign(documents_.begin(),
+                                   documents_.begin() + MAX_DOCS_PER_SAMPLE);
+            } else {
+                limited_docs = documents_;
+            }
+
             for (size_t i = 0; i < questions.size(); ++i) {
                 DataSample sample;
                 sample.id = std::to_string(i);
@@ -48,8 +59,9 @@ bool TrivialQADataset::load(const std::string& file_path) {
                     }
                 }
 
-                // 使用所有文档作为相关文档
-                sample.documents = documents_;
+                // 使用有限数量的文档作为相关文档（而不是所有文档）
+                // 这样可以避免生成超大的prompt
+                sample.documents = limited_docs;
 
                 samples_.push_back(sample);
             }

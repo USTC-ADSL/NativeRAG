@@ -103,12 +103,12 @@ class LLMTest : public TestBase {
       const auto& sample = samples[i];
       
       std::cout << "\nSample " << (i + 1) << ":\n";
-      std::cout << "  Query: " << sample.query.substr(0, 50) << "...\n";
+      std::cout << "  Query: " << sample.query.substr(0, 50) << "Length is :" << sample.query.length() << "...\n";
       std::cout << "  Expected answers: " << sample.answers.size() << '\n';
 
       // 构建 prompt
       std::string prompt = llm->build_prompt(sample.query, sample.documents);
-      
+      std::cout << "  Prompt length: " << prompt.length() << '\n';
       // 生成答案
       std::string answer = llm->generate(prompt);
       
