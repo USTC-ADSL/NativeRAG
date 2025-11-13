@@ -53,8 +53,30 @@ bool CommandLineArgs::parse_options() {
       config_.llm_model_path = argv_[++i];
     } else if (arg == "--embedding-model" && i + 1 < argc_) {
       config_.embedding_model_path = argv_[++i];
-    } else if (arg == "--vector-db" && i + 1 < argc_) {
-      config_.vector_db_path = argv_[++i];
+    } else if ((arg == "--sqlite-db" || arg == "--vector-db") && i + 1 < argc_) {
+      config_.sqlite_db_path = argv_[++i];
+    } else if (arg == "--faiss-type" && i + 1 < argc_) {
+      config_.faiss_index_type = argv_[++i];
+    } else if (arg == "--index-path" && i + 1 < argc_) {
+      config_.index_path = argv_[++i];
+    } else if (arg == "--dataset-path" && i + 1 < argc_) {
+      config_.dataset_path = argv_[++i];
+      config_.data_source = Config::DataSource::DATASET;
+      config_.input_file = config_.dataset_path;
+    } else if (arg == "--text-path" && i + 1 < argc_) {
+      config_.text_path = argv_[++i];
+      config_.data_source = Config::DataSource::TEXT;
+      config_.input_file = config_.text_path;
+    } else if (arg == "--data-source" && i + 1 < argc_) {
+      std::string mode = argv_[++i];
+      if (mode == "dataset") {
+        config_.data_source = Config::DataSource::DATASET;
+      } else if (mode == "txt" || mode == "text") {
+        config_.data_source = Config::DataSource::TEXT;
+      } else {
+        std::cerr << "Error: --data-source expects 'dataset' or 'txt'\n";
+        return false;
+      }
     } else if (arg == "--output" && i + 1 < argc_) {
       config_.output_file = argv_[++i];
     } else if (arg == "--top-k" && i + 1 < argc_) {
@@ -69,10 +91,15 @@ bool CommandLineArgs::parse_options() {
       config_.save_index = false;
     } else if (arg == "--no-load-index") {
       config_.load_index = false;
-    } else if (arg[0] != '-') {
+    } else if (!arg.empty() && arg[0] != '-') {
       // Positional argument
       if (config_.command == Command::BUILD && config_.input_file.empty()) {
         config_.input_file = arg;
+        if (config_.data_source == Config::DataSource::DATASET) {
+          config_.dataset_path = arg;
+        } else {
+          config_.text_path = arg;
+        }
       } else if (config_.command == Command::QUERY && config_.query.empty()) {
         config_.query = arg;
       }
@@ -89,24 +116,120 @@ bool CommandLineArgs::parse_options() {
     }
   }
 
+  if (config_.command == Command::BUILD) {
+    if (config_.data_source == Config::DataSource::DATASET) {
+      if (config_.dataset_path.empty()) {
+        config_.dataset_path = config_.input_file;
+      }
+      if (config_.input_file.empty()) {
+        config_.input_file = config_.dataset_path;
+      }
+    } else {
+      if (config_.text_path.empty()) {
+        config_.text_path = config_.input_file;
+      }
+      if (config_.input_file.empty()) {
+        config_.input_file = config_.text_path;
+      }
+    }
+  }
+
   return true;
 }
 
 bool CommandLineArgs::validate_config() {
   if (config_.command == Command::BUILD) {
-    if (config_.input_file.empty()) {
-      std::cerr << "Error: --build requires an input file path\n";
+    // BUILD phase: only needs embedding model, not LLM
+    if (config_.data_source == Config::DataSource::DATASET) {
+      if (config_.dataset_path.empty()) {
+        std::cerr << "Error: dataset mode requires --dataset-path\n";
+        return false;
+      }
+      if (!std::filesystem::exists(config_.dataset_path)) {
+        std::cerr << "Error: Dataset path not found: " << config_.dataset_path << '\n';
+        return false;
+      }
+      if (config_.input_file.empty()) {
+        config_.input_file = config_.dataset_path;
+      }
+    } else {
+      if (config_.text_path.empty()) {
+        std::cerr << "Error: text mode requires --text-path or positional file\n";
+        return false;
+      }
+      if (!std::filesystem::exists(config_.text_path)) {
+        std::cerr << "Error: Text path not found: " << config_.text_path << '\n';
+        return false;
+      }
+      if (config_.input_file.empty()) {
+        config_.input_file = config_.text_path;
+      }
+    }
+
+    // Validate embedding model for BUILD phase
+    if (config_.embedding_model_path.empty()) {
+      std::cerr << "Error: --embedding-model is required for --build\n";
       return false;
     }
-    if (!std::filesystem::exists(config_.input_file)) {
-      std::cerr << "Error: Input file not found: " << config_.input_file << '\n';
+    if (!std::filesystem::exists(config_.embedding_model_path)) {
+      std::cerr << "Error: Embedding model path not found: "
+                << config_.embedding_model_path << '\n';
       return false;
     }
   } else if (config_.command == Command::QUERY) {
+    // QUERY phase: needs both embedding model and LLM
     if (config_.query.empty()) {
       std::cerr << "Error: --query requires a query string\n";
       return false;
     }
+
+    // Validate LLM model for QUERY phase
+    if (config_.llm_model_path.empty()) {
+      std::cerr << "Error: --llm-model is required for --query\n";
+      return false;
+    }
+    if (!std::filesystem::exists(config_.llm_model_path)) {
+      std::cerr << "Error: LLM model path not found: " << config_.llm_model_path << '\n';
+      return false;
+    }
+
+    // Validate embedding model for QUERY phase
+    if (config_.embedding_model_path.empty()) {
+      std::cerr << "Error: --embedding-model is required for --query\n";
+      return false;
+    }
+    if (!std::filesystem::exists(config_.embedding_model_path)) {
+      std::cerr << "Error: Embedding model path not found: "
+                << config_.embedding_model_path << '\n';
+      return false;
+    }
+  } else if (config_.command == Command::INTERACTIVE) {
+    // INTERACTIVE phase: needs both embedding model and LLM
+    // Validate LLM model for INTERACTIVE phase
+    if (config_.llm_model_path.empty()) {
+      std::cerr << "Error: --llm-model is required for --interactive\n";
+      return false;
+    }
+    if (!std::filesystem::exists(config_.llm_model_path)) {
+      std::cerr << "Error: LLM model path not found: " << config_.llm_model_path << '\n';
+      return false;
+    }
+
+    // Validate embedding model for INTERACTIVE phase
+    if (config_.embedding_model_path.empty()) {
+      std::cerr << "Error: --embedding-model is required for --interactive\n";
+      return false;
+    }
+    if (!std::filesystem::exists(config_.embedding_model_path)) {
+      std::cerr << "Error: Embedding model path not found: "
+                << config_.embedding_model_path << '\n';
+      return false;
+    }
+  }
+
+  if (config_.faiss_index_type.empty()) {
+    std::cerr << "Error: --faiss-type cannot be empty\n";
+    return false;
   }
 
   if (config_.top_k <= 0) {
@@ -125,7 +248,7 @@ bool CommandLineArgs::validate_config() {
 void CommandLineArgs::print_usage() const {
   std::cout << "Usage: mobile_rag <command> [options] [arguments]\n"
             << "Commands:\n"
-            << "  --build <file>        Build index from file\n"
+            << "  --build <path>        Build index from txt file/dir or dataset file\n"
             << "  --query <question>    Query the RAG system\n"
             << "  --interactive, -i     Interactive mode\n"
             << "  --help, -h            Show this help message\n";
@@ -133,19 +256,29 @@ void CommandLineArgs::print_usage() const {
 
 void CommandLineArgs::print_help() const {
   std::cout << "\n╔════════════════════════════════════════════════════════════╗\n"
-            << "║         NativeRAG - Command Line Interface                 ║\n"
+            << "║         NativeRAG - Two-Stage Pipeline                     ║\n"
+            << "║    (Offline Indexing + Online Query)                       ║\n"
             << "╚════════════════════════════════════════════════════════════╝\n\n"
             << "USAGE:\n"
             << "  mobile_rag <command> [options] [arguments]\n\n"
             << "COMMANDS:\n"
-            << "  --build <file>        Build vector index from document file\n"
-            << "  --query <question>    Query the RAG system with a question\n"
-            << "  --interactive, -i     Start interactive mode\n"
+            << "  --build <file>        Build vector index from document file (Offline Phase)\n"
+            << "  --query <question>    Query the RAG system with a question (Online Phase)\n"
+            << "  --interactive, -i     Start interactive mode (Online Phase)\n"
             << "  --help, -h            Show this help message\n\n"
-            << "OPTIONS:\n"
-            << "  --llm-model <path>           Path to LLM model config (default: ../models/Qwen3-0.6B/config.json)\n"
-            << "  --embedding-model <path>     Path to embedding model\n"
-            << "  --vector-db <path>           Path to vector database (default: ./vector_db.index)\n"
+            << "REQUIRED OPTIONS BY COMMAND:\n"
+            << "  BUILD (Offline Phase):\n"
+            << "    --embedding-model <path>     Path to embedding model config (REQUIRED)\n"
+            << "    --text-path <path>           Text file/directory (for txt mode)\n"
+            << "    --dataset-path <path>        Dataset json path (for dataset mode)\n\n"
+            << "  QUERY/INTERACTIVE (Online Phase):\n"
+            << "    --llm-model <path>           Path to LLM model config (REQUIRED)\n"
+            << "    --embedding-model <path>     Path to embedding model config (REQUIRED)\n\n"
+            << "OPTIONAL OPTIONS:\n"
+            << "  --sqlite-db <path>           Path to sqlite vector/text store (default: ./vector_store.sqlite3)\n"
+            << "  --faiss-type <desc>          Faiss factory description (default: Flat)\n"
+            << "  --index-path <path>          Path to save/load Faiss index (default: ./faiss_index.bin)\n"
+            << "  --data-source <txt|dataset>  Choose loader mode (default: txt)\n"
             << "  --output <file>              Output file for results\n"
             << "  --top-k <num>                Number of documents to retrieve (default: 5)\n"
             << "  --threads <num>              Number of threads (default: 4)\n"
@@ -154,13 +287,21 @@ void CommandLineArgs::print_help() const {
             << "  --no-save-index              Don't save index after building\n"
             << "  --no-load-index              Don't load existing index\n\n"
             << "EXAMPLES:\n"
-            << "  # Build index from a text file\n"
-            << "  mobile_rag --build documents.txt --vector-db my_index.db\n\n"
-            << "  # Query with custom LLM model\n"
-            << "  mobile_rag --query \"What is AI?\" --llm-model ./models/my_model/config.json\n\n"
-            << "  # Interactive mode with verbose output\n"
-            << "  mobile_rag --interactive --verbose --top-k 10\n\n";
+            << "  # Stage 1: Build index from a text file (only needs embedding model)\n"
+            << "  mobile_rag --build --data-source txt --text-path documents.txt \\\n"
+            << "             --embedding-model ./models/emb/config.json\n\n"
+            << "  # Stage 1: Build index from a dataset json (only needs embedding model)\n"
+            << "  mobile_rag --build --data-source dataset --dataset-path dataset/data.json \\\n"
+            << "             --embedding-model ./models/emb/config.json \\\n"
+            << "             --faiss-type IVF512,PQ64\n\n"
+            << "  # Stage 2: Query (needs both embedding and LLM models)\n"
+            << "  mobile_rag --query \"What is AI?\" \\\n"
+            << "             --llm-model ./models/qwen/config.json \\\n"
+            << "             --embedding-model ./models/emb/config.json\n\n"
+            << "  # Stage 2: Interactive mode (needs both embedding and LLM models)\n"
+            << "  mobile_rag --interactive --verbose --top-k 10 \\\n"
+            << "             --llm-model ./models/qwen/config.json \\\n"
+            << "             --embedding-model ./models/emb/config.json\n\n";
 }
 
 }  // namespace mobile_rag
-

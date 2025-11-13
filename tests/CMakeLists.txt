@@ -1,19 +1,29 @@
 # Tests CMakeLists.txt
 
+# Set RPATH so executables can find shared libraries
+set(CMAKE_BUILD_RPATH_USE_ORIGIN TRUE)
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
+
 # Get prebuilt directory from parent CMakeLists
 if(USE_PREBUILT)
     set(PREBUILT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../prebuilt")
+    set(TARGET_PLATFORM "linux-x86_64")
+    if(ANDROID)
+        set(TARGET_PLATFORM "android-aarch64")
+    endif()
+
+    # Add RPATH for prebuilt libraries
+    set(CMAKE_BUILD_RPATH
+        "${PREBUILT_DIR}/${TARGET_PLATFORM}/MNN"
+        "${PREBUILT_DIR}/${TARGET_PLATFORM}/faiss"
+        "${PREBUILT_DIR}/${TARGET_PLATFORM}/llama"
+    )
 else()
     set(THIRD_PARTY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../third_party")
 endif()
 
 # Find required libraries for tests
 if(USE_PREBUILT)
-    set(TARGET_PLATFORM "linux-x86_64")
-    if(ANDROID)
-        set(TARGET_PLATFORM "android-aarch64")
-    endif()
-
     set(FAISS_PREBUILT_DIR "${PREBUILT_DIR}/${TARGET_PLATFORM}/faiss")
 
     # Add Faiss include directory directly (headers are in prebuilt/include/faiss/)
@@ -169,6 +179,14 @@ target_link_libraries(test_embedding PRIVATE
     rag_core
 )
 
+# Set RPATH for test_embedding
+if(USE_PREBUILT)
+    set_target_properties(test_embedding PROPERTIES
+        BUILD_RPATH "${CMAKE_BUILD_RPATH}"
+        INSTALL_RPATH "${CMAKE_BUILD_RPATH}"
+    )
+endif()
+
 # Group B (LLM) tests
 add_executable(test_llm
     ${CMAKE_CURRENT_SOURCE_DIR}/group_b_llm/test_llm.cpp
@@ -187,6 +205,14 @@ target_link_libraries(test_llm PRIVATE
     rag_core
 )
 
+# Set RPATH for test_llm
+if(USE_PREBUILT)
+    set_target_properties(test_llm PROPERTIES
+        BUILD_RPATH "${CMAKE_BUILD_RPATH}"
+        INSTALL_RPATH "${CMAKE_BUILD_RPATH}"
+    )
+endif()
+
 # Group C (VectorDB) integrated tests
 add_executable(test_vectordb_integrated
     ${CMAKE_CURRENT_SOURCE_DIR}/group_c_vectordb/test_vectordb_integrated.cpp
@@ -204,6 +230,14 @@ target_link_libraries(test_vectordb_integrated PRIVATE
     dataset_lib
     rag_core
 )
+
+# Set RPATH for test_vectordb_integrated
+if(USE_PREBUILT)
+    set_target_properties(test_vectordb_integrated PROPERTIES
+        BUILD_RPATH "${CMAKE_BUILD_RPATH}"
+        INSTALL_RPATH "${CMAKE_BUILD_RPATH}"
+    )
+endif()
 
 target_compile_definitions(test_vectordb_integrated PRIVATE PROJECT_ROOT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/..")
 
@@ -225,6 +259,14 @@ target_link_libraries(test_rag_integration PRIVATE
     dataset_lib
     rag_core
 )
+
+# Set RPATH for test_rag_integration
+if(USE_PREBUILT)
+    set_target_properties(test_rag_integration PROPERTIES
+        BUILD_RPATH "${CMAKE_BUILD_RPATH}"
+        INSTALL_RPATH "${CMAKE_BUILD_RPATH}"
+    )
+endif()
 
 # Enable testing
 enable_testing()
