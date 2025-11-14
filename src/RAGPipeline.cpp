@@ -1,7 +1,7 @@
 #include "RAGPipeline.hpp"
 
-#include <algorithm>
 #include <iostream>
+#include <iomanip>
 
 namespace mobile_rag {
 
@@ -106,9 +106,16 @@ std::string RAGPipeline::answer_query(const std::string& query) {
   constexpr int kTopK = 5;
   std::vector<std::pair<int64_t, float>> results = index_->search(q, kTopK);
 
+  // Print query and retrieval results for debugging/inspection
+  std::cout << "\n[QUERY] " << query << '\n';
+  if (results.empty()) {
+    std::cout << "[RETRIEVAL] No results\n";
+  }
+
   std::vector<std::string> retrieved_chunks;
   retrieved_chunks.reserve(results.size());
-  for (const auto& [id, score] : results) {
+  for (size_t rank = 0; rank < results.size(); ++rank) {
+    const auto& [id, score] = results[rank];
     std::string chunk;
 
     // Try to get text from SQLite first (persistent storage)
@@ -126,6 +133,18 @@ std::string RAGPipeline::answer_query(const std::string& query) {
 
     if (!chunk.empty()) {
       retrieved_chunks.push_back(chunk);
+      // Prepare a one-line preview
+      std::string preview = chunk.substr(0, 120);
+      for (char& c : preview) {
+        if (c == '\n' || c == '\r' || c == '\t') c = ' ';
+      }
+      std::cout << "[TOP-" << (rank + 1) << "] id=" << id
+                << " score=" << std::fixed << std::setprecision(4) << score
+                << " | " << preview << (chunk.size() > 120 ? "..." : "") << '\n';
+    } else {
+      std::cout << "[TOP-" << (rank + 1) << "] id=" << id
+                << " score=" << std::fixed << std::setprecision(4) << score
+                << " | (text not found)" << '\n';
     }
   }
 

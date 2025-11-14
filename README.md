@@ -1,10 +1,67 @@
 # Native RAG
 
-Native RAG System For Phone
+NativeRAG：移动端 RAG 系统
 
-Support different LLM Backend(Llama.cpp/MNN/mllm)
+支持多种大语言模型后端（Llama.cpp / MNN / MLLM）
 
-Support different vector index(base on Faiss)
+支持多种向量索引方式（基于 Faiss）
+
+## 0. ✅ 使用前提与快速开始
+
+### 使用前提
+- **运行环境**: CMake ≥ 3.15，GCC/Clang，Linux/macOS/Android NDK(仅安卓)。
+- **第三方库**: 默认使用 `prebuilt/` 中的预编译库；如需自编译，参考下文“编译与构建”。
+- **模型文件**:
+  - Embedding 模型：通过 `--embedding-model` 指定路径。
+  - LLM 模型：通过 `--llm-model` 指定路径（查询阶段需要）。
+- **数据源**:
+  - 文本文件模式：当前支持 `.txt`；会在构建索引时按字符切分。
+  - 数据集模式：输入 JSON（TrivialQA 类似），每条样本包含 `id`、`query`、`answers`、`documents`（字符串数组）。
+    例如：
+    ```json
+    {
+      "id": "sample-001",
+      "query": "What is AI?",
+      "answers": ["Artificial Intelligence", "AI"],
+      "documents": ["doc paragraph 1 ...", "doc paragraph 2 ..."]
+    }
+    ```
+- **切分与进度**:
+  - 字符切分：默认 `chunk_size=1000`，`overlap=200`（与 `TextFileLoader` 一致）。
+  - 嵌入批量：默认批大小 `64`；构建索引时会打印进度日志：`Embedded X/Y (Z%)`。
+- **向量索引与持久化**: 使用 Faiss 建索引；(ChunkID -> ChunkText) 会写入 SQLite，便于检索原文。
+
+### 快速开始
+- 使用预编译库快速构建：
+  ```bash
+  mkdir -p build && cd build
+  cmake .. -DUSE_PREBUILT=ON
+  make -j$(nproc)
+  ```
+- 从文本文件构建索引（自动切分 + 进度提示）：
+  ```bash
+  ./mobile_rag_cli --build \
+    --text-path documents.txt \
+    --embedding-model ./models/emb/config.json \
+    --index-path ./faiss_index.bin \
+    --verbose
+  ```
+- 从数据集构建索引（对 documents 逐条切分 + 进度提示）：
+  ```bash
+  ./mobile_rag_dataset --build \
+    --dataset-path dataset/data.json \
+    --embedding-model ./models/emb/config.json \
+    --index-path ./faiss_index.bin \
+    --verbose
+  ```
+- 执行查询（复用索引 + LLM 推理）：
+  ```bash
+  ./mobile_rag_cli --query "What is AI?" \
+    --llm-model ./models/qwen/config.json \
+    --embedding-model ./models/emb/config.json \
+    --index-path ./faiss_index.bin \
+    --verbose
+  ```
 
 ## 1. 🎯 目标与背景
 
