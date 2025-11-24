@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NativeRAG - 双模式查询</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            opacity: 0.9;
+            font-size: 1.1em;
+        }
+        
+        .content {
+            padding: 30px;
+        }
+        
+        .input-section {
+            margin-bottom: 30px;
+        }
+        
+        .input-group {
+            margin-bottom: 15px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+            color: #333;
+        }
+        
+        input[type="text"], textarea {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+        
+        input[type="text"]:focus, textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        textarea {
+            min-height: 100px;
+            resize: vertical;
+        }
+        
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            width: 100%;
+        }
+        
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+        
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .results {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-top: 30px;
+        }
+        
+        .result-box {
+            border: 2px solid #e0e0e0;
+            border-radius: 12px;
+            padding: 20px;
+            background: #f9f9f9;
+        }
+        
+        .result-box h3 {
+            margin-bottom: 15px;
+            color: #667eea;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .status-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        
+        .status-waiting {
+            background: #fff3cd;
+            color: #856404;
+        }
+        
+        .status-processing {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+        
+        .status-done {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .status-error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .result-content {
+            margin-top: 15px;
+            padding: 15px;
+            background: white;
+            border-radius: 8px;
+            min-height: 100px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+        }
+        
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        @media (max-width: 768px) {
+            .results {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 NativeRAG</h1>
+            <p>端侧推理 + 云端增强</p>
+        </div>
+        
+        <div class="content">
+            <div class="input-section">
+                <div class="input-group">
+                    <label for="query">输入您的问题：</label>
+                    <textarea id="query" placeholder="例如：什么是人工智能的最新发展趋势？"></textarea>
+                </div>
+                
+                <div class="input-group">
+                    <label for="llm_model">LLM模型路径：</label>
+                    <input type="text" id="llm_model" placeholder="例如: /path/to/model.mnn">
+                </div>
+                
+                <div class="input-group">
+                    <label for="embedding_model">Embedding模型路径：</label>
+                    <input type="text" id="embedding_model" placeholder="例如: /path/to/embedding.mnn">
+                </div>
+                
+                <div class="input-group">
+                    <label for="index_path">索引路径：</label>
+                    <input type="text" id="index_path" placeholder="例如: ./index.faiss">
+                </div>
+                
+                <div class="input-group">
+                    <label for="sqlite_db">SQLite数据库路径：</label>
+                    <input type="text" id="sqlite_db" placeholder="例如: ./rag.db">
+                </div>
+                
+                <button id="submitBtn" onclick="submitQuery()">提交查询</button>
+            </div>
+            
+            <div class="results" id="results" style="display: none;">
+                <div class="result-box">
+                    <h3>
+                        💻 端侧推理结果
+                        <span class="status-badge status-waiting" id="localStatus">等待中</span>
+                    </h3>
+                    <div class="result-content" id="localResult">
+                        <div class="loading">
+                            <div class="spinner"></div>
+                            正在处理...
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="result-box">
+                    <h3>
+                        ☁️ 云端推理结果
+                        <span class="status-badge status-waiting" id="cloudStatus">等待中</span>
+                    </h3>
+                    <div class="result-content" id="cloudResult">
+                        <div class="loading">
+                            <div class="spinner"></div>
+                            正在处理...
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let cloudPollInterval = null;
+        
+        function updateStatus(elementId, status, text) {
+            const element = document.getElementById(elementId);
+            element.className = 'status-badge status-' + status;
+            element.textContent = text;
+        }
+        
+        function updateResult(elementId, content, isError = false) {
+            const element = document.getElementById(elementId);
+            if (isError) {
+                element.innerHTML = '<div style="color: #721c24; background: #f8d7da; padding: 10px; border-radius: 5px;">' + 
+                                    content + '</div>';
+            } else {
+                element.textContent = content || '无结果';
+            }
+        }
+        
+        async function submitQuery() {
+            const query = document.getElementById('query').value.trim();
+            if (!query) {
+                alert('请输入问题');
+                return;
+            }
+            
+            // 禁用按钮
+            const btn = document.getElementById('submitBtn');
+            btn.disabled = true;
+            btn.textContent = '处理中...';
+            
+            // 显示结果区域
+            document.getElementById('results').style.display = 'grid';
+            
+            // 重置状态
+            updateStatus('localStatus', 'processing', '处理中');
+            updateStatus('cloudStatus', 'waiting', '等待中');
+            updateResult('localResult', '正在处理端侧推理...');
+            updateResult('cloudResult', '等待云端响应...');
+            
+            // 准备配置
+            const config = {
+                llm_model: document.getElementById('llm_model').value.trim(),
+                embedding_model: document.getElementById('embedding_model').value.trim(),
+                index_path: document.getElementById('index_path').value.trim(),
+                sqlite_db: document.getElementById('sqlite_db').value.trim()
+            };
+            
+            try {
+                // 发送请求
+                const response = await fetch('/api/query', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        query: query,
+                        config: config
+                    })
+                });
+                
+                const data = await response.json();
+                
+                // 处理本地结果
+                if (data.local && data.local.success) {
+                    updateStatus('localStatus', 'done', '完成');
+                    updateResult('localResult', data.local.answer || '无答案');
+                } else {
+                    updateStatus('localStatus', 'error', '错误');
+                    updateResult('localResult', data.local?.error || '端侧推理失败', true);
+                }
+                
+                // 如果云端也完成了
+                if (data.cloud_done && data.cloud) {
+                    if (data.cloud.success) {
+                        updateStatus('cloudStatus', 'done', '完成');
+                        updateResult('cloudResult', data.cloud.answer || '无答案');
+                    } else {
+                        updateStatus('cloudStatus', 'error', '错误');
+                        updateResult('cloudResult', data.cloud.error || '云端请求失败', true);
+                    }
+                } else {
+                    // 使用SSE监听云端结果
+                    startCloudStreaming(data.query_id);
+                }
+                
+            } catch (error) {
+                updateStatus('localStatus', 'error', '错误');
+                updateResult('localResult', '请求失败: ' + error.message, true);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '提交查询';
+            }
+        }
+        
+        function startCloudStreaming(queryId) {
+            updateStatus('cloudStatus', 'processing', '处理中');
+            
+            // 使用EventSource进行SSE连接
+            const eventSource = new EventSource(`/api/stream/${queryId}`);
+            
+            eventSource.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                
+                if (data.type === 'cloud') {
+                    eventSource.close();
+                    if (data.data && data.data.success) {
+                        updateStatus('cloudStatus', 'done', '完成');
+                        updateResult('cloudResult', data.data.answer || '无答案');
+                    } else {
+                        updateStatus('cloudStatus', 'error', '错误');
+                        updateResult('cloudResult', data.data?.error || '云端请求失败', true);
+                    }
+                }
+            };
+            
+            eventSource.onerror = function(error) {
+                console.error('SSE error:', error);
+                // 如果连接关闭，尝试轮询
+                eventSource.close();
+                startCloudPolling(queryId);
+            };
+        }
+        
+        function startCloudPolling(queryId) {
+            updateStatus('cloudStatus', 'processing', '处理中');
+            
+            const pollInterval = setInterval(async () => {
+                try {
+                    const response = await fetch(`/api/status/${queryId}`);
+                    const data = await response.json();
+                    
+                    if (data.cloud_done) {
+                        clearInterval(pollInterval);
+                        if (data.cloud && data.cloud.success) {
+                            updateStatus('cloudStatus', 'done', '完成');
+                            updateResult('cloudResult', data.cloud.answer || '无答案');
+                        } else {
+                            updateStatus('cloudStatus', 'error', '错误');
+                            updateResult('cloudResult', data.cloud?.error || '云端请求失败', true);
+                        }
+                    }
+                } catch (error) {
+                    console.error('Polling error:', error);
+                }
+            }, 2000); // 每2秒轮询一次
+            
+            // 5分钟后停止轮询
+            setTimeout(() => {
+                clearInterval(pollInterval);
+                if (document.getElementById('cloudStatus').textContent === '处理中') {
+                    updateStatus('cloudStatus', 'error', '超时');
+                    updateResult('cloudResult', '云端请求超时', true);
+                }
+            }, 300000);
+        }
+    </script>
+</body>
+</html>
+
