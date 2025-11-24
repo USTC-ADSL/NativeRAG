@@ -50,8 +50,8 @@ NativeRAG：移动端 RAG 系统
   ```bash
   # MNN 版 Qwen 指令模型
   huggingface download \
-    --model 'taobao-mnn/Qwen2-1.5B-Instruct-MNN' \
-    --local_dir './models/llm_qwen2_mnn'
+    --model 'taobao-mnn/Qwen3-0.6B-MNN' \
+    --local_dir './models/llm_qwen3_mnn'
 
   # llama.cpp GGUF 权重
   huggingface download \
@@ -60,7 +60,7 @@ NativeRAG：移动端 RAG 系统
 
   # 运行查询
   ./mobile_rag_cli --query "What is AI?" \
-    --llm-model ./models/llm_llama3_gguf/Meta-Llama-3-8B-Instruct-Q4_K_M.gguf \
+    --llm-model ./models/llm_qwen3_mnn/config.json \
     --embedding-model ./models/emb_qwen3_mnn/config.json \
     --index-path ./faiss_index.bin
   ```
