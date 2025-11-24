@@ -26,6 +26,46 @@ NativeRAG：移动端 RAG 系统
       "documents": ["doc paragraph 1 ...", "doc paragraph 2 ..."]
     }
     ```
+- **模型下载**:
+  - 推荐使用 `huggingface` CLI（`pip install -U huggingface_hub` 并登录 `huggingface-cli login`），可直接把模型拉取到本地。
+  - 下载完成后，将 `config.json`/权重文件路径分别传给 `--embedding-model` 与 `--llm-model` 参数。
+
+  **Embedding（MNN）示例：**
+
+  ```bash
+  # shell download
+  huggingface download \
+    --model 'taobao-mnn/Qwen3-Embedding-0.6B-MNN' \
+    --local_dir './models/emb_qwen3_mnn'
+
+  # 构建/查询时指向模型目录
+  ./mobile_rag_cli --build \
+    --text-path documents.txt \
+    --embedding-model ./models/emb_qwen3_mnn/config.json \
+    --index-path ./faiss_index.bin
+  ```
+
+  **LLM（MNN / llama.cpp）示例：**
+
+  ```bash
+  # MNN 版 Qwen 指令模型
+  huggingface download \
+    --model 'taobao-mnn/Qwen2-1.5B-Instruct-MNN' \
+    --local_dir './models/llm_qwen2_mnn'
+
+  # llama.cpp GGUF 权重
+  huggingface download \
+    --model 'QuantFactory/Meta-Llama-3-Int4' \
+    --local_dir './models/llm_llama3_gguf'
+
+  # 运行查询
+  ./mobile_rag_cli --query "What is AI?" \
+    --llm-model ./models/llm_llama3_gguf/Meta-Llama-3-8B-Instruct-Q4_K_M.gguf \
+    --embedding-model ./models/emb_qwen3_mnn/config.json \
+    --index-path ./faiss_index.bin
+  ```
+
+  > 若使用 MLLM 后端，请确保下载后的权重路径传入 `--llm-model`，并在 `cmake .. -DLLM_BACKEND=MLLM` 时启用对应后端。
 - **切分与进度**:
   - 字符切分：默认 `chunk_size=1000`，`overlap=200`（与 `TextFileLoader` 一致）。
   - 嵌入批量：默认批大小 `64`；构建索引时会打印进度日志：`Embedded X/Y (Z%)`。
@@ -38,6 +78,7 @@ NativeRAG：移动端 RAG 系统
   cmake .. -DUSE_PREBUILT=ON
   make -j$(nproc)
   ```
+
 - 从文本文件构建索引（自动切分 + 进度提示）：
   ```bash
   ./mobile_rag_cli --build \
@@ -207,9 +248,6 @@ make -j$(nproc)
 ```bash
 # 运行主程序
 ./mobile_rag_cli
-
-# 运行测试
-ctest --output-on-failure
 ```
 
 ### 3.4 两阶段 Pipeline 使用指南
@@ -378,42 +416,12 @@ NativeRAG 采用**两阶段设计**，将 RAG 工作流分为离线阶段和查�
 
 - 输出： 最终答案 (字符串)
 
-## 5. 👥 预期分工 (Team Breakdown)
+## 5. 🔜 后续规划 & 协作方式
 
-为并行推进项目，按以下分工：
+核心链路已打通，现阶段聚焦特性演进与体验迭代，可按“功能模组负责人”轻量协作：
 
-- Group A (数据源 -> 向量)
+- **检索与索引负责人**：评估并扩展 Faiss 配置（IVF/HNSW、量化策略）、补齐 sqlite-vec/SQLite 混合索引能力，并沉淀性能对比数据。
+- **模型与推理负责人**：维护 MNN/MLLM/llama.cpp 三类后端，新增主流 GGUF/MNN 模型范式、自动量化脚本，以及模型管理（下载/校验）自动化。
+- **产品体验负责人**：完善数据导入工具（Markdown/HTML/多语），补充评测脚本、交互式 CLI/UI 体验以及 Android Demo 打包。
 
-    - 任务： 打通从 File 到 Embedding 的数据通路。
-
-    - 职责： 负责 IDocumentLoader 和 IEmbeddingModel 接口的实现（即 Step 1 & 2）。
-
-    - 技术栈： purecpp, MNN。
-
-- Group B (LLM 后端)
-
-    - 任务： 打通 LLM Backend 的调用通路。
-
-    - 职责： 负责 ILargeLanguageModel 接口的实现（即 Step 7）。
-
-    - 技术栈： MLLM, Llama.cpp。
-
-- Group C (向量 -> 数据库)
-
-    - 任务： 打通从 Embedding 到 向量数据库/索引 的数据通路。
-
-    - 职责： 负责 IVectorDB 接口的实现，支持插入、构建、持久化（即 Step 3）。
-
-    - 技术栈： Faiss, sqlite-vec, SQLite。
-
-- Group D (RAG 核心逻辑)
-
-    - 任务： 打通从 Query 到 Full Prompt 的逻辑通路。
-
-    - 职责： 调用 Group A 和 C 的接口，串联查询阶段的核心逻辑（即 Step 4, 5, 6）。
-
-    - 技术栈： C++ 业务逻辑。
-
-- 系统集成 (Integration)
-
-    - 职责： 负责定义并维护上述C++抽象接口（.hpp文件），编写 RAGPipeline 胶水代码，以及 main.cpp 命令行程序。
+每个负责人面向 feature backlog 自主迭代，保持 issue/PR 模式协同即可，无需再划分大规模小组。
