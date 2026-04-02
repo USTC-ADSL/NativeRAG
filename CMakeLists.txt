@@ -105,14 +105,105 @@ target_include_directories(mobile_rag_cli
 # SQLite3 #
 ############
 find_package(SQLite3 REQUIRED)
+
+set(_SQLITE3_INCLUDE_DIRS "")
+if(SQLite3_INCLUDE_DIRS)
+  list(APPEND _SQLITE3_INCLUDE_DIRS ${SQLite3_INCLUDE_DIRS})
+endif()
+if(SQLite3_INCLUDE_DIR)
+  list(APPEND _SQLITE3_INCLUDE_DIRS ${SQLite3_INCLUDE_DIR})
+endif()
+list(REMOVE_DUPLICATES _SQLITE3_INCLUDE_DIRS)
+
+set(_SQLITE3_LIBRARIES "")
+if(SQLite3_LIBRARIES)
+  list(APPEND _SQLITE3_LIBRARIES ${SQLite3_LIBRARIES})
+endif()
+if(SQLite3_LIBRARY)
+  list(APPEND _SQLITE3_LIBRARIES ${SQLite3_LIBRARY})
+endif()
+list(REMOVE_DUPLICATES _SQLITE3_LIBRARIES)
+
 if (TARGET SQLite::SQLite3)
   target_link_libraries(mobile_rag_cli PRIVATE SQLite::SQLite3)
-else()
-  target_link_libraries(mobile_rag_cli PRIVATE ${SQLite3_LIBRARIES})
-  target_include_directories(mobile_rag_cli PRIVATE ${SQLite3_INCLUDE_DIRS})
+endif()
+if(_SQLITE3_LIBRARIES)
+  target_link_libraries(mobile_rag_cli PRIVATE ${_SQLITE3_LIBRARIES})
+endif()
+if(_SQLITE3_INCLUDE_DIRS)
+  target_include_directories(mobile_rag_cli PRIVATE ${_SQLITE3_INCLUDE_DIRS})
 endif()
 
 # Prebuilt third-party libraries (MNN and llama.cpp) in third_party/
+########################
+# Embedding Runtime    #
+########################
+# The current embedding path always relies on MNN runtime support, regardless
+# of which LLM backend is selected.
+if(USE_PREBUILT)
+  set(MNN_PREBUILT_DIR "${PREBUILT_DIR}/${TARGET_PLATFORM}/MNN")
+  target_include_directories(mobile_rag_cli PRIVATE "${PREBUILT_DIR}/include/MNN")
+
+  find_library(MNN_LIBRARY NAMES MNN
+    HINTS "${MNN_PREBUILT_DIR}"
+    NO_DEFAULT_PATH
+    NO_CMAKE_FIND_ROOT_PATH
+  )
+  find_library(MNN_EXPRESS_LIBRARY NAMES MNN_Express
+    HINTS "${MNN_PREBUILT_DIR}"
+    NO_DEFAULT_PATH
+    NO_CMAKE_FIND_ROOT_PATH
+  )
+  find_library(MNN_LLM_LIBRARY NAMES llm
+    HINTS "${MNN_PREBUILT_DIR}"
+    NO_DEFAULT_PATH
+    NO_CMAKE_FIND_ROOT_PATH
+  )
+else()
+  find_path(MNN_INCLUDE_DIR NAMES MNN/Interpreter.hpp
+    HINTS "${THIRD_PARTY_DIR}/MNN" "${THIRD_PARTY_DIR}/MNN/include"
+    NO_DEFAULT_PATH
+  )
+  find_library(MNN_LIBRARY NAMES MNN libMNN
+    HINTS "${THIRD_PARTY_DIR}/MNN" "${THIRD_PARTY_DIR}/MNN/lib" "${THIRD_PARTY_DIR}/MNN/build"
+    NO_DEFAULT_PATH
+  )
+  find_library(MNN_EXPRESS_LIBRARY NAMES MNN_Express libMNN_Express
+    HINTS "${THIRD_PARTY_DIR}/MNN" "${THIRD_PARTY_DIR}/MNN/lib" "${THIRD_PARTY_DIR}/MNN/build"
+    NO_DEFAULT_PATH
+  )
+  find_library(MNN_LLM_LIBRARY NAMES llm libllm
+    HINTS "${THIRD_PARTY_DIR}/MNN" "${THIRD_PARTY_DIR}/MNN/lib" "${THIRD_PARTY_DIR}/MNN/build"
+    NO_DEFAULT_PATH
+  )
+  if (MNN_INCLUDE_DIR)
+    target_include_directories(mobile_rag_cli PRIVATE "${MNN_INCLUDE_DIR}")
+  endif()
+  target_include_directories(mobile_rag_cli PRIVATE
+    "${THIRD_PARTY_DIR}/MNN/tools/audio/include"
+    "${THIRD_PARTY_DIR}/MNN/transformers/llm/engine/include"
+    "${THIRD_PARTY_DIR}/MNN/include"
+    "${THIRD_PARTY_DIR}/MNN/tools/cv/include"
+    "${THIRD_PARTY_DIR}/MNN/3rd_party"
+  )
+endif()
+
+if (MNN_LIBRARY)
+  target_link_libraries(mobile_rag_cli PRIVATE "${MNN_LIBRARY}")
+else()
+  message(WARNING "MNN library not found. Embedding runtime requires it.")
+endif()
+if (MNN_EXPRESS_LIBRARY)
+  target_link_libraries(mobile_rag_cli PRIVATE "${MNN_EXPRESS_LIBRARY}")
+else()
+  message(WARNING "MNN_Express library not found. Embedding runtime may fail to link.")
+endif()
+if (MNN_LLM_LIBRARY)
+  target_link_libraries(mobile_rag_cli PRIVATE "${MNN_LLM_LIBRARY}")
+else()
+  message(WARNING "MNN LLM library not found. Embedding runtime may fail to link.")
+endif()
+
 #######################
 # Vector Index Select #
 #######################
@@ -132,13 +223,16 @@ if (VECTOR_INDEX STREQUAL "Faiss")
     find_library(FAISS_LIBRARY NAMES faiss
       HINTS "${FAISS_PREBUILT_DIR}"
       NO_DEFAULT_PATH
+      NO_CMAKE_FIND_ROOT_PATH
     )
 
     # Also link OpenBLAS if it exists (for Android)
     if(TARGET_PLATFORM STREQUAL "android-aarch64")
       find_library(OPENBLAS_LIBRARY NAMES openblas
-        HINTS "${PREBUILT_DIR}/${TARGET_PLATFORM}/openblas/lib"
+        HINTS "${PREBUILT_DIR}/${TARGET_PLATFORM}/openblas"
+              "${PREBUILT_DIR}/${TARGET_PLATFORM}/openblas/lib"
         NO_DEFAULT_PATH
+        NO_CMAKE_FIND_ROOT_PATH
       )
       if(OPENBLAS_LIBRARY)
         message(STATUS "Found OpenBLAS library: ${OPENBLAS_LIBRARY}")
@@ -182,38 +276,9 @@ if (LLM_BACKEND STREQUAL "MNN")
   if(USE_PREBUILT)
     # 使用 prebuilt 库
     message(STATUS "Looking for MNN in prebuilt/")
-    set(MNN_PREBUILT_DIR "${PREBUILT_DIR}/${TARGET_PLATFORM}/MNN")
-
-    # Include headers from prebuilt/include/MNN/
-    target_include_directories(mobile_rag_cli PRIVATE "${PREBUILT_DIR}/include/MNN")
-
-    # Find library in prebuilt/platform/MNN/ (libraries are directly in the directory)
-    find_library(MNN_LIBRARY NAMES MNN
-      HINTS "${MNN_PREBUILT_DIR}"
-      NO_DEFAULT_PATH
-    )
   else()
     # 使用 third_party 库
     message(STATUS "Looking for MNN in third_party/")
-    find_path(MNN_INCLUDE_DIR NAMES MNN/Interpreter.hpp
-      HINTS "${THIRD_PARTY_DIR}/MNN" "${THIRD_PARTY_DIR}/MNN/include"
-      NO_DEFAULT_PATH
-    )
-    find_library(MNN_LIBRARY NAMES MNN libMNN
-      HINTS "${THIRD_PARTY_DIR}/MNN" "${THIRD_PARTY_DIR}/MNN/lib" "${THIRD_PARTY_DIR}/MNN/build"
-      NO_DEFAULT_PATH
-    )
-    if (MNN_INCLUDE_DIR)
-      target_include_directories(mobile_rag_cli PRIVATE "${MNN_INCLUDE_DIR}")
-    endif()
-    # Additional include directories requested for MNN
-    target_include_directories(mobile_rag_cli PRIVATE
-      "${THIRD_PARTY_DIR}/MNN/tools/audio/include"
-      "${THIRD_PARTY_DIR}/MNN/transformers/llm/engine/include"
-      "${THIRD_PARTY_DIR}/MNN/include"
-      "${THIRD_PARTY_DIR}/MNN/tools/cv/include"
-      "${THIRD_PARTY_DIR}/MNN/3rd_party"
-    )
   endif()
 
   if (MNN_LIBRARY)
@@ -222,20 +287,12 @@ if (LLM_BACKEND STREQUAL "MNN")
 
     # Also link MNN_Express if using prebuilt
     if(USE_PREBUILT)
-      find_library(MNN_EXPRESS_LIBRARY NAMES MNN_Express
-        HINTS "${MNN_PREBUILT_DIR}"
-        NO_DEFAULT_PATH
-      )
       if(MNN_EXPRESS_LIBRARY)
         message(STATUS "Found MNN_Express library: ${MNN_EXPRESS_LIBRARY}")
         target_link_libraries(mobile_rag_cli PRIVATE "${MNN_EXPRESS_LIBRARY}")
       endif()
 
       # Link libllm if it exists (generated when MNN_BUILD_LLM=ON)
-      find_library(MNN_LLM_LIBRARY NAMES llm
-        HINTS "${MNN_PREBUILT_DIR}"
-        NO_DEFAULT_PATH
-      )
       if(MNN_LLM_LIBRARY)
         message(STATUS "Found MNN LLM library: ${MNN_LLM_LIBRARY}")
         target_link_libraries(mobile_rag_cli PRIVATE "${MNN_LLM_LIBRARY}")
@@ -268,6 +325,7 @@ elseif (LLM_BACKEND STREQUAL "MLLM")
     find_library(MLLM_LIBRARY NAMES mllm
       HINTS "${MLLM_PREBUILT_DIR}"
       NO_DEFAULT_PATH
+      NO_CMAKE_FIND_ROOT_PATH
     )
   else()
     # 使用 third_party 库
@@ -308,6 +366,12 @@ elseif (LLM_BACKEND STREQUAL "LlamaCpp")
     find_library(LLAMA_LIBRARY NAMES llama
       HINTS "${LLAMA_PREBUILT_DIR}"
       NO_DEFAULT_PATH
+      NO_CMAKE_FIND_ROOT_PATH
+    )
+    find_library(GGML_LIBRARY NAMES ggml
+      HINTS "${LLAMA_PREBUILT_DIR}"
+      NO_DEFAULT_PATH
+      NO_CMAKE_FIND_ROOT_PATH
     )
   else()
     # 使用 third_party 库
@@ -317,6 +381,10 @@ elseif (LLM_BACKEND STREQUAL "LlamaCpp")
       NO_DEFAULT_PATH
     )
     find_library(LLAMA_LIBRARY NAMES llama libllama
+      HINTS "${THIRD_PARTY_DIR}/llama.cpp" "${THIRD_PARTY_DIR}/llama.cpp/lib" "${THIRD_PARTY_DIR}/llama.cpp/build"
+      NO_DEFAULT_PATH
+    )
+    find_library(GGML_LIBRARY NAMES ggml libggml
       HINTS "${THIRD_PARTY_DIR}/llama.cpp" "${THIRD_PARTY_DIR}/llama.cpp/lib" "${THIRD_PARTY_DIR}/llama.cpp/build"
       NO_DEFAULT_PATH
     )
@@ -334,6 +402,12 @@ elseif (LLM_BACKEND STREQUAL "LlamaCpp")
     target_link_libraries(mobile_rag_cli PRIVATE "${LLAMA_LIBRARY}")
   else()
     message(WARNING "llama.cpp library not found. Please build it or use prebuilt libraries.")
+  endif()
+  if (GGML_LIBRARY)
+    message(STATUS "Found ggml library: ${GGML_LIBRARY}")
+    target_link_libraries(mobile_rag_cli PRIVATE "${GGML_LIBRARY}")
+  else()
+    message(WARNING "ggml library not found. llama.cpp backend may fail to link.")
   endif()
 
   target_sources(mobile_rag_cli PRIVATE
@@ -393,12 +467,37 @@ target_include_directories(mobile_rag_dataset
     "${CMAKE_CURRENT_SOURCE_DIR}/dataset/include"
 )
 
+if(USE_PREBUILT)
+  target_include_directories(mobile_rag_dataset PRIVATE "${PREBUILT_DIR}/include/MNN")
+elseif(MNN_INCLUDE_DIR)
+  target_include_directories(mobile_rag_dataset PRIVATE "${MNN_INCLUDE_DIR}")
+  target_include_directories(mobile_rag_dataset PRIVATE
+    "${THIRD_PARTY_DIR}/MNN/tools/audio/include"
+    "${THIRD_PARTY_DIR}/MNN/transformers/llm/engine/include"
+    "${THIRD_PARTY_DIR}/MNN/include"
+    "${THIRD_PARTY_DIR}/MNN/tools/cv/include"
+    "${THIRD_PARTY_DIR}/MNN/3rd_party"
+  )
+endif()
+
 # Link SQLite3 for mobile_rag_dataset
 if (TARGET SQLite::SQLite3)
   target_link_libraries(mobile_rag_dataset PRIVATE SQLite::SQLite3)
-else()
-  target_link_libraries(mobile_rag_dataset PRIVATE ${SQLite3_LIBRARIES})
-  target_include_directories(mobile_rag_dataset PRIVATE ${SQLite3_INCLUDE_DIRS})
+endif()
+if(_SQLITE3_LIBRARIES)
+  target_link_libraries(mobile_rag_dataset PRIVATE ${_SQLITE3_LIBRARIES})
+endif()
+if(_SQLITE3_INCLUDE_DIRS)
+  target_include_directories(mobile_rag_dataset PRIVATE ${_SQLITE3_INCLUDE_DIRS})
+endif()
+if(MNN_LIBRARY)
+  target_link_libraries(mobile_rag_dataset PRIVATE "${MNN_LIBRARY}")
+endif()
+if(MNN_EXPRESS_LIBRARY)
+  target_link_libraries(mobile_rag_dataset PRIVATE "${MNN_EXPRESS_LIBRARY}")
+endif()
+if(MNN_LLM_LIBRARY)
+  target_link_libraries(mobile_rag_dataset PRIVATE "${MNN_LLM_LIBRARY}")
 endif()
 
 # Copy all the same library configurations from mobile_rag_cli to mobile_rag_dataset
@@ -438,6 +537,9 @@ elseif (LLM_BACKEND STREQUAL "LlamaCpp")
   target_compile_definitions(mobile_rag_dataset PRIVATE LLM_BACKEND_LLAMA=1)
   target_include_directories(mobile_rag_dataset SYSTEM PRIVATE "${PREBUILT_DIR}/include/llama")
   target_link_libraries(mobile_rag_dataset PRIVATE ${LLAMA_LIBRARY})
+  if(GGML_LIBRARY)
+    target_link_libraries(mobile_rag_dataset PRIVATE ${GGML_LIBRARY})
+  endif()
   if (LLAMA_INCLUDE_DIR)
     target_include_directories(mobile_rag_dataset PRIVATE "${LLAMA_INCLUDE_DIR}")
   endif()

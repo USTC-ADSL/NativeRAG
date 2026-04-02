@@ -116,6 +116,27 @@ copy_libraries() {
     fi
 }
 
+# Locate the Android OpenBLAS shared object in the prebuilt directory.
+# Older script logic expected a nested lib/ directory, but copy_libraries()
+# places shared objects directly in prebuilt/android-aarch64/openblas/.
+find_android_openblas_so() {
+    local openblas_root="${PREBUILT_DIR}/android-aarch64/openblas"
+    local candidates=(
+        "${openblas_root}/libopenblas.so"
+        "${openblas_root}/lib/libopenblas.so"
+    )
+
+    local candidate
+    for candidate in "${candidates[@]}"; do
+        if [ -f "$candidate" ]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
 # Check if Android NDK is available
 check_android_ndk() {
     if [ -z "$ANDROID_NDK" ]; then
@@ -301,10 +322,17 @@ build_openblas_android() {
 build_faiss_android() {
     print_info "Building Faiss for Android aarch64..."
 
+    local openblas_so=""
+
     # First build OpenBLAS if not already built
-    if [ ! -f "${PREBUILT_DIR}/android-aarch64/openblas/lib/libopenblas.so" ]; then
+    if ! openblas_so="$(find_android_openblas_so)"; then
         print_info "OpenBLAS not found, building it first..."
         build_openblas_android
+
+        if ! openblas_so="$(find_android_openblas_so)"; then
+            print_error "OpenBLAS shared library not found after build"
+            return 1
+        fi
     fi
 
     cd "${THIRD_PARTY_DIR}/faiss"
@@ -324,9 +352,9 @@ build_faiss_android() {
         -DFAISS_ENABLE_PYTHON=OFF \
         -DFAISS_ENABLE_MKL=OFF \
         -DBUILD_TESTING=OFF \
-        -DBLAS_LIBRARIES="${PREBUILT_DIR}/android-aarch64/openblas/libopenblas.so" \
+        -DBLAS_LIBRARIES="${openblas_so}" \
         -DBLAS_INCLUDE_DIRS="${PREBUILT_INCLUDE_OPENBLAS}" \
-        -DLAPACK_LIBRARIES="${PREBUILT_DIR}/android-aarch64/openblas/libopenblas.so" \
+        -DLAPACK_LIBRARIES="${openblas_so}" \
         -DLAPACK_INCLUDE_DIRS="${PREBUILT_INCLUDE_OPENBLAS}" \
         -DCMAKE_INSTALL_PREFIX="${PWD}/install"
 
@@ -337,7 +365,7 @@ build_faiss_android() {
     copy_libraries "install/lib" "android-aarch64" "faiss"
 
     # Also copy OpenBLAS dependency
-    cp "${PREBUILT_DIR}/android-aarch64/openblas/libopenblas.so" "${PREBUILT_DIR}/android-aarch64/faiss/"
+    cp "${openblas_so}" "${PREBUILT_DIR}/android-aarch64/faiss/"
 
     # Copy headers to prebuilt/include/faiss/ (shared across architectures)
     copy_headers "install/include/faiss" "faiss"
@@ -614,4 +642,3 @@ main() {
 
 # Run main function
 main
-
