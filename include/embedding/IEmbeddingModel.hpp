@@ -15,8 +15,9 @@ class IEmbeddingModel {
 
   virtual std::vector<std::vector<float>> embed_documents(
       const std::vector<std::string>& texts) = 0;
+
+  virtual void set_num_threads(int /*num_threads*/) {}
 };
 
 }  // namespace mobile_rag
-
 

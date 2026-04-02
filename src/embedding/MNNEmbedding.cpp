@@ -10,6 +10,22 @@ using namespace MNN::Express;
 
 namespace mobile_rag {
 
+void MNNEmbedding::set_num_threads(int num_threads) {
+  if (num_threads <= 0) {
+    return;
+  }
+
+  num_threads_ = num_threads;
+  if (embedding_) {
+    const std::string config =
+        std::string("{\"thread_num\":") + std::to_string(num_threads_) + "}";
+    if (!embedding_->set_config(config)) {
+      std::cerr << "[MNNEmbedding] Warning: failed to update thread_num to "
+                << num_threads_ << '\n';
+    }
+  }
+}
+
 bool MNNEmbedding::load_model(const std::string& model_path) {
   model_loaded_ = false;
   try {
@@ -37,6 +53,13 @@ bool MNNEmbedding::load_model(const std::string& model_path) {
       embedding_.reset();
       embed_dim_ = 0;
       return false;
+    }
+
+    const std::string config =
+        std::string("{\"thread_num\":") + std::to_string(num_threads_) + "}";
+    if (!embedding->set_config(config)) {
+      std::cerr << "[MNNEmbedding] Warning: failed to set thread_num to "
+                << num_threads_ << '\n';
     }
 
     embedding_.reset(embedding);
@@ -116,5 +139,4 @@ std::vector<std::vector<float>> MNNEmbedding::embed_documents(
 }
 
 }  // namespace mobile_rag
-
 

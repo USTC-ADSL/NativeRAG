@@ -16,8 +16,11 @@ class ILargeLanguageModel {
                                    const std::vector<std::string>& contexts) = 0;
 
   virtual std::string generate(const std::string& prompt) = 0;
+
+  virtual void set_num_threads(int /*num_threads*/) {}
+
+  virtual void set_max_new_tokens(int /*max_new_tokens*/) {}
 };
 
 }  // namespace mobile_rag
-
 

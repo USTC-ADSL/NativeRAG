@@ -51,6 +51,11 @@ class CommandLineArgs {
     // Performance
     int num_threads = 4;
     int top_k = 5;  // Number of documents to retrieve
+    int max_new_tokens = 256;
+
+    // Chunking
+    size_t chunk_size = 1000;
+    size_t chunk_overlap = 200;
 
     // Flags
     bool verbose = false;

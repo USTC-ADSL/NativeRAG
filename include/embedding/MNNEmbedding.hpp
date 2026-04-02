@@ -22,12 +22,14 @@ class MNNEmbedding : public IEmbeddingModel {
   std::vector<std::vector<float>> embed_documents(
       const std::vector<std::string>& texts) override;
 
+  void set_num_threads(int num_threads) override;
+
  private:
   std::unique_ptr<MNN::Transformer::Embedding> embedding_;
   int embed_dim_ = 384;
   bool model_loaded_ = false;
+  int num_threads_ = 4;
 };
 
 }  // namespace mobile_rag
-
 

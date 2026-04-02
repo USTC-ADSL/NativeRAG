@@ -22,11 +22,16 @@ class MNNModel : public ILargeLanguageModel {
 
   std::string generate(const std::string& prompt) override;
 
+  void set_num_threads(int num_threads) override;
+
+  void set_max_new_tokens(int max_new_tokens) override;
+
  private:
   std::unique_ptr<MNN::Transformer::Llm> llm_;
+  int num_threads_ = 4;
+  int max_new_tokens_ = 256;
 };
 
 }  // namespace mobile_rag
-
 
 

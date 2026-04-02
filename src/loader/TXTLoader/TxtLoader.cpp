@@ -4,6 +4,7 @@
 #include <cctype>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <string>
 #include <vector>
 
@@ -39,13 +40,12 @@ static inline std::string read_file_text(const std::string& file_path) {
 }  // namespace
 
 std::vector<std::string> TxtLoader::load_texts(const std::string& path) {
-  std::vector<std::string> texts;
-
   namespace fs = std::filesystem;
   std::error_code ec;
   fs::path p(path);
 
   if (fs::is_regular_file(p, ec)) {
+    std::vector<std::string> texts;
     if (has_txt_extension(path)) {
       auto content = read_file_text(path);
       if (!content.empty()) texts.push_back(std::move(content));
@@ -54,21 +54,76 @@ std::vector<std::string> TxtLoader::load_texts(const std::string& path) {
   }
 
   if (fs::is_directory(p, ec)) {
+    std::vector<std::string> files;
     for (auto& entry : fs::recursive_directory_iterator(p, ec)) {
       if (entry.is_regular_file(ec)) {
         auto file_path = entry.path().string();
         if (has_txt_extension(file_path)) {
-          auto content = read_file_text(file_path);
-          if (!content.empty()) texts.push_back(std::move(content));
+          files.push_back(std::move(file_path));
         }
       }
     }
+
+    if (files.empty()) {
+      return {};
+    }
+
+    std::sort(files.begin(), files.end());
+
+    const size_t worker_count =
+        std::min(static_cast<size_t>(std::max(1u, num_threads_)), files.size());
+
+    if (worker_count <= 1) {
+      std::vector<std::string> texts;
+      texts.reserve(files.size());
+      for (const auto& file_path : files) {
+        auto content = read_file_text(file_path);
+        if (!content.empty()) {
+          texts.push_back(std::move(content));
+        }
+      }
+      return texts;
+    }
+
+    std::vector<std::future<std::vector<std::string>>> futures;
+    futures.reserve(worker_count);
+
+    const size_t batch_size = (files.size() + worker_count - 1) / worker_count;
+    for (size_t worker = 0; worker < worker_count; ++worker) {
+      const size_t begin = worker * batch_size;
+      const size_t end = std::min(begin + batch_size, files.size());
+      if (begin >= end) {
+        break;
+      }
+
+      futures.push_back(std::async(std::launch::async, [begin, end, &files]() {
+        std::vector<std::string> batch_texts;
+        batch_texts.reserve(end - begin);
+        for (size_t i = begin; i < end; ++i) {
+          auto content = read_file_text(files[i]);
+          if (!content.empty()) {
+            batch_texts.push_back(std::move(content));
+          }
+        }
+        return batch_texts;
+      }));
+    }
+
+    std::vector<std::string> texts;
+    texts.reserve(files.size());
+    for (auto& future : futures) {
+      auto batch_texts = future.get();
+      texts.insert(texts.end(),
+                   std::make_move_iterator(batch_texts.begin()),
+                   std::make_move_iterator(batch_texts.end()));
+    }
+
+    return texts;
   }
 
-  return texts;
+  return {};
 }
 
 }  // namespace mobile_rag
-
 
 

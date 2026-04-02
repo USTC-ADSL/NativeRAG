@@ -83,6 +83,12 @@ bool CommandLineArgs::parse_options() {
       config_.top_k = std::stoi(argv_[++i]);
     } else if (arg == "--threads" && i + 1 < argc_) {
       config_.num_threads = std::stoi(argv_[++i]);
+    } else if (arg == "--max-new-tokens" && i + 1 < argc_) {
+      config_.max_new_tokens = std::stoi(argv_[++i]);
+    } else if (arg == "--chunk-size" && i + 1 < argc_) {
+      config_.chunk_size = static_cast<size_t>(std::stoull(argv_[++i]));
+    } else if (arg == "--chunk-overlap" && i + 1 < argc_) {
+      config_.chunk_overlap = static_cast<size_t>(std::stoull(argv_[++i]));
     } else if (arg == "--verbose" || arg == "-v") {
       config_.verbose = true;
     } else if (arg == "--gpu") {
@@ -242,6 +248,21 @@ bool CommandLineArgs::validate_config() {
     return false;
   }
 
+  if (config_.max_new_tokens <= 0) {
+    std::cerr << "Error: --max-new-tokens must be positive\n";
+    return false;
+  }
+
+  if (config_.chunk_size == 0) {
+    std::cerr << "Error: --chunk-size must be positive\n";
+    return false;
+  }
+
+  if (config_.chunk_overlap >= config_.chunk_size) {
+    std::cerr << "Error: --chunk-overlap must be smaller than --chunk-size\n";
+    return false;
+  }
+
   return true;
 }
 
@@ -282,6 +303,9 @@ void CommandLineArgs::print_help() const {
             << "  --output <file>              Output file for results\n"
             << "  --top-k <num>                Number of documents to retrieve (default: 5)\n"
             << "  --threads <num>              Number of threads (default: 4)\n"
+            << "  --max-new-tokens <num>       Maximum generated tokens (default: 256)\n"
+            << "  --chunk-size <num>           Chunk size for offline indexing (default: 1000)\n"
+            << "  --chunk-overlap <num>        Chunk overlap for offline indexing (default: 200)\n"
             << "  --verbose, -v                Enable verbose output\n"
             << "  --gpu                        Use GPU acceleration (if available)\n"
             << "  --no-save-index              Don't save index after building\n"

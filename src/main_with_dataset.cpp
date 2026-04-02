@@ -36,7 +36,10 @@ int main(int argc, char** argv) {
                                                                                      : "txt")
               << '\n'
               << "  Top-K: " << config.top_k << '\n'
-              << "  Threads: " << config.num_threads << '\n';
+              << "  Threads: " << config.num_threads << '\n'
+              << "  Max New Tokens: " << config.max_new_tokens << '\n'
+              << "  Chunk Size: " << config.chunk_size << '\n'
+              << "  Chunk Overlap: " << config.chunk_overlap << '\n';
   }
 
   // Initialize SQLite DB for persisting id->text mappings
@@ -48,10 +51,12 @@ int main(int argc, char** argv) {
     // Only need: loader, embedder, index
     // No need for: LLM
 
-    auto loader = std::make_shared<TextFileLoader>();
+    auto loader = std::make_shared<TextFileLoader>(config.num_threads, config.chunk_size,
+                                                   config.chunk_overlap);
     auto embedder = std::make_shared<MNNEmbedding>();
     auto index = std::make_shared<FaissIndex>(config.faiss_index_type,
                                               faiss::METRIC_INNER_PRODUCT);
+    embedder->set_num_threads(config.num_threads);
 
     // Load embedding model
     if (!embedder->load_model(config.embedding_model_path)) {
@@ -65,7 +70,9 @@ int main(int argc, char** argv) {
     }
 
     // Create pipeline without LLM for offline phase
-    RAGPipelineWithDataset pipeline(loader, embedder, index, nullptr, sqlite_db);
+    RAGPipelineWithDataset pipeline(loader, embedder, index, nullptr, sqlite_db,
+                                    config.top_k, config.chunk_size,
+                                    config.chunk_overlap);
     // ========== 离线阶段 (Offline/Indexing Phase) ==========
     if (config.verbose) {
       std::cout << "[INFO] === OFFLINE PHASE: Building Index ===\n"
@@ -118,6 +125,9 @@ int main(int argc, char** argv) {
     auto index = std::make_shared<FaissIndex>(config.faiss_index_type,
                                               faiss::METRIC_INNER_PRODUCT);
     auto llm = create_llm();
+    embedder->set_num_threads(config.num_threads);
+    llm->set_num_threads(config.num_threads);
+    llm->set_max_new_tokens(config.max_new_tokens);
 
     // Load embedding model
     if (!embedder->load_model(config.embedding_model_path)) {
@@ -141,7 +151,9 @@ int main(int argc, char** argv) {
     }
 
     // Create pipeline without loader for query phase
-    RAGPipelineWithDataset pipeline(nullptr, embedder, index, llm, sqlite_db);
+    RAGPipelineWithDataset pipeline(nullptr, embedder, index, llm, sqlite_db,
+                                    config.top_k, config.chunk_size,
+                                    config.chunk_overlap);
 
     if (config.verbose) {
       std::cout << "[INFO] === ONLINE PHASE: Query Processing ===\n"
@@ -178,6 +190,9 @@ int main(int argc, char** argv) {
     auto index = std::make_shared<FaissIndex>(config.faiss_index_type,
                                               faiss::METRIC_INNER_PRODUCT);
     auto llm = create_llm();
+    embedder->set_num_threads(config.num_threads);
+    llm->set_num_threads(config.num_threads);
+    llm->set_max_new_tokens(config.max_new_tokens);
 
     // Load embedding model
     if (!embedder->load_model(config.embedding_model_path)) {
@@ -201,7 +216,9 @@ int main(int argc, char** argv) {
     }
 
     // Create pipeline without loader for interactive phase
-    RAGPipelineWithDataset pipeline(nullptr, embedder, index, llm, sqlite_db);
+    RAGPipelineWithDataset pipeline(nullptr, embedder, index, llm, sqlite_db,
+                                    config.top_k, config.chunk_size,
+                                    config.chunk_overlap);
 
     std::cout << "╔════════════════════════════════════════════════════════════╗\n"
               << "║    NativeRAG with Dataset - Interactive Mode              ║\n"

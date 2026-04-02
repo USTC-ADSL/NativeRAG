@@ -22,7 +22,10 @@ class RAGPipelineWithDataset : public RAGPipeline {
                          std::shared_ptr<IEmbeddingModel> embedder,
                          std::shared_ptr<IVectorIndex> index,
                          std::shared_ptr<ILargeLanguageModel> llm,
-                         std::shared_ptr<SqliteVectorDB> sqlite_db = nullptr);
+                         std::shared_ptr<SqliteVectorDB> sqlite_db = nullptr,
+                         int top_k = 5,
+                         size_t chunk_size = 1000,
+                         size_t chunk_overlap = 200);
 
   /**
    * 从数据集加载文档并构建索引
@@ -46,4 +49,3 @@ class RAGPipelineWithDataset : public RAGPipeline {
 };
 
 }  // namespace mobile_rag
-

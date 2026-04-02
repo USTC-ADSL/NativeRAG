@@ -4,6 +4,8 @@
 #include <sstream>
 #include <filesystem>
 
+#include "llm/PromptUtils.hpp"
+
 namespace mobile_rag {
 
 // Helper function to convert relative path to absolute path
@@ -22,6 +24,38 @@ static std::string resolve_path(const std::string& path) {
   }
 }
 
+void MNNModel::set_num_threads(int num_threads) {
+  if (num_threads <= 0) {
+    return;
+  }
+
+  num_threads_ = num_threads;
+  if (llm_) {
+    const std::string config =
+        std::string("{\"thread_num\":") + std::to_string(num_threads_) + "}";
+    if (!llm_->set_config(config)) {
+      std::cerr << "[MNNModel] Warning: failed to update thread_num to "
+                << num_threads_ << '\n';
+    }
+  }
+}
+
+void MNNModel::set_max_new_tokens(int max_new_tokens) {
+  if (max_new_tokens <= 0) {
+    return;
+  }
+
+  max_new_tokens_ = max_new_tokens;
+  if (llm_) {
+    const std::string config =
+        std::string("{\"max_new_tokens\":") + std::to_string(max_new_tokens_) + "}";
+    if (!llm_->set_config(config)) {
+      std::cerr << "[MNNModel] Warning: failed to update max_new_tokens to "
+                << max_new_tokens_ << '\n';
+    }
+  }
+}
+
 bool MNNModel::load_model(const std::string& model_path) {
   try {
     // Resolve the path to absolute path to avoid issues with relative paths
@@ -35,9 +69,14 @@ bool MNNModel::load_model(const std::string& model_path) {
       return false;
     }
 
-    // Configure the LLM with temporary path for KV cache
-    // Set use_template to true to use the model's built-in chat template
-    std::string config = R"({"tmp_path":"tmp","use_template":true})";
+    // Configure the LLM with temporary path, thread count, and a plain
+    // assistant template that does not inject reasoning tags.
+    std::ostringstream config_stream;
+    config_stream << "{\"tmp_path\":\"tmp\",\"use_template\":true,"
+                  << "\"thread_num\":" << num_threads_ << ','
+                  << "\"max_new_tokens\":" << max_new_tokens_ << ','
+                  << "\"assistant_prompt_template\":\"<|im_start|>assistant\\n<think>\\n</think>%s<|im_end|>\\n\"}";
+    const std::string config = config_stream.str();
     if (!llm_->set_config(config)) {
       std::cerr << "[MNNModel] Failed to set config" << '\n';
       llm_.reset();
@@ -66,19 +105,7 @@ bool MNNModel::load_model(const std::string& model_path) {
 
 std::string MNNModel::build_prompt(const std::string& query,
                                    const std::vector<std::string>& contexts) {
-  // Build a RAG-style prompt with query and retrieved documents
-  std::string prompt = query;
-
-  if (!contexts.empty()) {
-    prompt += "\n\nRelated documents:\n";
-    for (size_t i = 0; i < contexts.size(); ++i) {
-      prompt += "[Document " + std::to_string(i + 1) + "]: ";
-      prompt += contexts[i];
-      prompt += "\n";
-    }
-  }
-
-  return prompt;
+  return build_rag_prompt(query, contexts) + "\n<think>\n</think>";
 }
 
 std::string MNNModel::generate(const std::string& prompt) {
@@ -90,22 +117,23 @@ std::string MNNModel::generate(const std::string& prompt) {
   try {
     // Use stringstream to capture the model's output
     std::ostringstream oss;
+    MNN::Transformer::ChatMessages messages = {
+        {"system",
+         "You are a retrieval-augmented assistant. "
+         "Answer using only the provided reference documents. "
+         "If the answer is missing, say \"I don't know based on the provided documents.\" "
+         "Do not output analysis or <think> tags. Return only the final answer."},
+        {"user", prompt},
+    };
 
-    // Call response with the prompt, output stream, and end token
-    // The model will generate tokens until it reaches the end token or max tokens
-    llm_->response(prompt, &oss, "\n");
+    // Use a non-newline stop string to avoid prematurely truncating the answer
+    // after the first line break.
+    llm_->response(messages, &oss, "<eop>", max_new_tokens_);
 
     // Reset the model state for the next inference
     llm_->reset();
 
-    std::string result = oss.str();
-
-    // Trim trailing whitespace and newlines
-    while (!result.empty() && (result.back() == '\n' || result.back() == ' ')) {
-      result.pop_back();
-    }
-
-    return result;
+    return cleanup_generation_output(oss.str());
   } catch (const std::exception& e) {
     std::cerr << "[MNNModel] Exception during generation: " << e.what() << '\n';
     return {};
@@ -116,6 +144,3 @@ std::string MNNModel::generate(const std::string& prompt) {
 }
 
 }  // namespace mobile_rag
-
-
-

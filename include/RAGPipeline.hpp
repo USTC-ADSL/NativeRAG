@@ -21,7 +21,10 @@ class RAGPipeline {
               std::shared_ptr<IEmbeddingModel> embedder,
               std::shared_ptr<IVectorIndex> index,
               std::shared_ptr<ILargeLanguageModel> llm,
-              std::shared_ptr<SqliteVectorDB> sqlite_db = nullptr);
+              std::shared_ptr<SqliteVectorDB> sqlite_db = nullptr,
+              int top_k = 5,
+              size_t chunk_size = 1000,
+              size_t chunk_overlap = 200);
 
   // ========== 离线阶段 (Offline/Indexing Phase) ==========
   /**
@@ -50,6 +53,10 @@ class RAGPipeline {
   std::string answer_query(const std::string& query);
 
  protected:
+  bool add_text_embeddings(const std::vector<std::string>& texts,
+                           const std::vector<std::vector<float>>& vectors,
+                           const std::string& source_label);
+
   std::shared_ptr<IDocumentLoader> loader_;
   std::shared_ptr<IEmbeddingModel> embedder_;
   std::shared_ptr<IVectorIndex> index_;
@@ -58,8 +65,9 @@ class RAGPipeline {
 
   std::map<int64_t, std::string> id_to_chunk_;
   int64_t next_id_ = 0;
+  int top_k_ = 5;
+  size_t chunk_size_ = 1000;
+  size_t chunk_overlap_ = 200;
 };
 
 }  // namespace mobile_rag
-
-

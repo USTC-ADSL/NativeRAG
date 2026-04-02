@@ -11,9 +11,13 @@ RAGPipelineWithDataset::RAGPipelineWithDataset(
     std::shared_ptr<IEmbeddingModel> embedder,
     std::shared_ptr<IVectorIndex> index,
     std::shared_ptr<ILargeLanguageModel> llm,
-    std::shared_ptr<SqliteVectorDB> sqlite_db)
+    std::shared_ptr<SqliteVectorDB> sqlite_db,
+    int top_k,
+    size_t chunk_size,
+    size_t chunk_overlap)
     : RAGPipeline(std::move(loader), std::move(embedder), std::move(index),
-                  std::move(llm), std::move(sqlite_db)) {}
+                  std::move(llm), std::move(sqlite_db), top_k,
+                  chunk_size, chunk_overlap) {}
 
 void RAGPipelineWithDataset::build_index_from_dataset(
     const std::shared_ptr<IDataset>& dataset, bool use_documents) {
@@ -22,15 +26,21 @@ void RAGPipelineWithDataset::build_index_from_dataset(
     return;
   }
 
-  std::vector<std::string> texts_to_embed;
-  std::vector<std::string> metadata;
+  if (!embedder_) {
+    std::cerr << "[RAGPipelineWithDataset] Embedder is not initialized" << '\n';
+    return;
+  }
 
+  if (!index_) {
+    std::cerr << "[RAGPipelineWithDataset] Vector index is not initialized" << '\n';
+    return;
+  }
+
+  std::vector<std::string> texts_to_embed;
   // 收集要嵌入的文本
   auto samples = dataset->get_all();
   // 与 TextFileLoader 中保持一致的默认切分策略
-  constexpr size_t kChunkSize = 1000;
-  constexpr size_t kOverlap = 200;
-  CharacterSplitter splitter(kChunkSize, kOverlap);
+  CharacterSplitter splitter(chunk_size_, chunk_overlap_);
 
   for (size_t i = 0; i < samples.size(); ++i) {
     const auto& sample = samples[i];
@@ -43,13 +53,11 @@ void RAGPipelineWithDataset::build_index_from_dataset(
         if (chunks.empty()) continue;
         for (size_t k = 0; k < chunks.size(); ++k) {
           texts_to_embed.push_back(chunks[k]);
-          metadata.push_back(sample.id + "_doc_" + std::to_string(j) + "_chunk_" + std::to_string(k));
         }
       }
     } else {
       // 使用问题
       texts_to_embed.push_back(sample.query);
-      metadata.push_back(sample.id + "_query");
     }
   }
 
@@ -74,31 +82,12 @@ void RAGPipelineWithDataset::build_index_from_dataset(
                                    texts_to_embed.begin() + end);
 
     auto vectors = embedder_->embed_documents(batch);
-    if (vectors.size() != batch.size()) {
-      std::cerr << "[RAGPipelineWithDataset] Batch embeddings size mismatch: got "
-                << vectors.size() << ", expected " << batch.size() << " (batch starting at "
-                << start << ")\n";
-      continue;
-    }
-
-    std::vector<int64_t> batch_ids;
-    batch_ids.reserve(vectors.size());
-    for (size_t i = 0; i < vectors.size(); ++i) {
-      const int64_t id = next_id_++;
-      batch_ids.push_back(id);
-      id_to_chunk_[id] = batch[i];
-    }
-
-    if (!vectors.empty()) {
-      index_->add_vectors(vectors, batch_ids);
-      total_added += vectors.size();
-    }
-
-    if (sqlite_db_) {
-      if (!sqlite_db_->add_texts(batch, batch_ids)) {
-        std::cerr << "[RAGPipelineWithDataset] Warning: Failed to persist a batch of "
-                  << batch.size() << " text chunks to SQLite\n";
-      }
+    const int64_t next_id_before = next_id_;
+    if (add_text_embeddings(batch, vectors, "dataset indexing batch")) {
+      total_added += static_cast<size_t>(next_id_ - next_id_before);
+    } else {
+      std::cerr << "[RAGPipelineWithDataset] Warning: Failed to add batch starting at "
+                << start << '\n';
     }
 
     processed += batch.size();
@@ -138,4 +127,3 @@ RAGPipelineWithDataset::get_answers_from_dataset(
 }
 
 }  // namespace mobile_rag
-
