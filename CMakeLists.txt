@@ -28,7 +28,7 @@ endif()
 set(VECTOR_INDEX "Faiss" CACHE STRING "Vector index implementation (Faiss or None)")
 set_property(CACHE VECTOR_INDEX PROPERTY STRINGS Faiss None)
 
-set(LLM_BACKEND "MNN" CACHE STRING "LLM backend (MNN, MLLM, or LlamaCpp)")
+set(LLM_BACKEND "LlamaCpp" CACHE STRING "LLM backend (MNN, MLLM, or LlamaCpp)")
 set_property(CACHE LLM_BACKEND PROPERTY STRINGS MNN MLLM LlamaCpp)
 
 # 检测目标平台
@@ -353,6 +353,7 @@ elseif (LLM_BACKEND STREQUAL "MLLM")
   )
 elseif (LLM_BACKEND STREQUAL "LlamaCpp")
   message(STATUS "Using LLM_BACKEND=LlamaCpp")
+  target_compile_definitions(mobile_rag_cli PRIVATE LLM_BACKEND_LLAMA=1)
 
   if(USE_PREBUILT)
     # 使用 prebuilt 库
@@ -623,9 +624,9 @@ endif()
 #      make -j$(nproc)
 #
 # 选择 LLM 后端:
-#   cmake .. -DLLM_BACKEND=MNN      # 默认
+#   cmake .. -DLLM_BACKEND=LlamaCpp # 默认
+#   cmake .. -DLLM_BACKEND=MNN
 #   cmake .. -DLLM_BACKEND=MLLM
-#   cmake .. -DLLM_BACKEND=LlamaCpp
 #
 # 选择向量索引:
 #   cmake .. -DVECTOR_INDEX=Faiss   # 默认

@@ -14,6 +14,26 @@
 #include "llm/LLMFactory.hpp"
 #include "dataset/TrivialQADataset.hpp"
 
+namespace {
+
+const char* current_llm_backend_name() {
+#if defined(LLM_BACKEND_LLAMA)
+  return "LlamaCpp";
+#elif defined(LLM_BACKEND_MNN)
+  return "MNN";
+#elif defined(LLM_BACKEND_MLLM)
+  return "MLLM";
+#else
+  return "Unknown";
+#endif
+}
+
+const char* current_embedding_backend_name() {
+  return "MNN";
+}
+
+}  // namespace
+
 int main(int argc, char** argv) {
   using namespace mobile_rag;
 
@@ -27,6 +47,8 @@ int main(int argc, char** argv) {
 
   if (config.verbose) {
     std::cout << "[INFO] Configuration:\n"
+              << "  LLM Backend: " << current_llm_backend_name() << '\n'
+              << "  Embedding Backend: " << current_embedding_backend_name() << '\n'
               << "  LLM Model: " << config.llm_model_path << '\n'
               << "  Embedding Model: " << config.embedding_model_path << '\n'
               << "  SQLite DB: " << config.sqlite_db_path << '\n'

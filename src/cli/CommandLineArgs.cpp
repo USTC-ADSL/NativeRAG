@@ -276,12 +276,31 @@ void CommandLineArgs::print_usage() const {
 }
 
 void CommandLineArgs::print_help() const {
+#if defined(LLM_BACKEND_LLAMA)
+  constexpr const char* llm_backend_name = "LlamaCpp";
+  constexpr const char* llm_model_hint =
+      "GGUF file or a directory containing GGUF weights";
+#elif defined(LLM_BACKEND_MNN)
+  constexpr const char* llm_backend_name = "MNN";
+  constexpr const char* llm_model_hint = "MNN config.json";
+#elif defined(LLM_BACKEND_MLLM)
+  constexpr const char* llm_backend_name = "MLLM";
+  constexpr const char* llm_model_hint = "MLLM model path";
+#else
+  constexpr const char* llm_backend_name = "Unknown";
+  constexpr const char* llm_model_hint = "model path accepted by the compiled backend";
+#endif
+
   std::cout << "\n╔════════════════════════════════════════════════════════════╗\n"
             << "║         NativeRAG - Two-Stage Pipeline                     ║\n"
             << "║    (Offline Indexing + Online Query)                       ║\n"
             << "╚════════════════════════════════════════════════════════════╝\n\n"
             << "USAGE:\n"
             << "  mobile_rag <command> [options] [arguments]\n\n"
+            << "BUILD NOTES:\n"
+            << "  Current LLM backend: " << llm_backend_name << '\n'
+            << "  --llm-model expects: " << llm_model_hint << '\n'
+            << "  Embedding backend: MNN (embedding model should point to its config)\n\n"
             << "COMMANDS:\n"
             << "  --build <file>        Build vector index from document file (Offline Phase)\n"
             << "  --query <question>    Query the RAG system with a question (Online Phase)\n"
@@ -320,11 +339,11 @@ void CommandLineArgs::print_help() const {
             << "             --faiss-type IVF512,PQ64\n\n"
             << "  # Stage 2: Query (needs both embedding and LLM models)\n"
             << "  mobile_rag --query \"What is AI?\" \\\n"
-            << "             --llm-model ./models/qwen/config.json \\\n"
+            << "             --llm-model ./models/llm/model.gguf \\\n"
             << "             --embedding-model ./models/emb/config.json\n\n"
             << "  # Stage 2: Interactive mode (needs both embedding and LLM models)\n"
             << "  mobile_rag --interactive --verbose --top-k 10 \\\n"
-            << "             --llm-model ./models/qwen/config.json \\\n"
+            << "             --llm-model ./models/llm/model.gguf \\\n"
             << "             --embedding-model ./models/emb/config.json\n\n";
 }
 
