@@ -147,6 +147,22 @@ else()
     target_include_directories(rag_core PUBLIC ${SQLite3_INCLUDE_DIRS})
 endif()
 
+add_executable(test_sqlite_vectordb_backend
+    ${CMAKE_CURRENT_SOURCE_DIR}/group_c_vectordb/test_sqlite_vectordb_backend.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/vector_db/SqliteVectorDB.cpp
+)
+
+target_include_directories(test_sqlite_vectordb_backend PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+)
+
+if (TARGET SQLite::SQLite3)
+    target_link_libraries(test_sqlite_vectordb_backend PRIVATE SQLite::SQLite3)
+else()
+    target_link_libraries(test_sqlite_vectordb_backend PRIVATE ${SQLite3_LIBRARIES})
+    target_include_directories(test_sqlite_vectordb_backend PRIVATE ${SQLite3_INCLUDE_DIRS})
+endif()
+
 # RAGPipelineWithDataset library
 add_library(rag_pipeline_dataset STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/RAGPipelineWithDataset.cpp
@@ -294,4 +310,3 @@ message(STATUS "  - test_llm (Group B)")
 message(STATUS "  - test_vectordb (Group C - basic)")
 message(STATUS "  - test_vectordb_integrated (Group C - integrated)")
 message(STATUS "  - test_rag_integration (Full pipeline)")
-
