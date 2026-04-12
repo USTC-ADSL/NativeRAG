@@ -219,7 +219,7 @@ make -j$(nproc)
 | 选项 | 默认值 | 说明 |
 |------|--------|------|
 | `USE_PREBUILT` | ON | 使用 prebuilt 库（ON）或 third_party 库（OFF） |
-| `LLM_BACKEND` | MNN | LLM 后端：MNN / MLLM / LlamaCpp |
+| `LLM_BACKEND` | LlamaCpp | LLM 后端：MNN / MLLM / LlamaCpp |
 | `VECTOR_INDEX` | Faiss | 向量索引：Faiss / None |
 | `BUILD_TESTS` | ON | 编译单元测试 |
 

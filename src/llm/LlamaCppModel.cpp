@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "llm/LlamaCppLogging.hpp"
 #include "llm/PromptUtils.hpp"
 
 namespace mobile_rag {
@@ -16,6 +17,7 @@ namespace {
 void initialize_llama_backend_once() {
   static std::once_flag once;
   std::call_once(once, []() {
+    install_quiet_llama_logging();
     llama_backend_init();
     ggml_backend_load_all();
   });

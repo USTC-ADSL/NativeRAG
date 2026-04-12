@@ -58,6 +58,14 @@ if(USE_PREBUILT)
         HINTS "${PREBUILT_DIR}/${TARGET_PLATFORM}/llama"
         NO_DEFAULT_PATH
     )
+    find_library(GGML_LIBRARY NAMES ggml
+        HINTS "${PREBUILT_DIR}/${TARGET_PLATFORM}/llama"
+        NO_DEFAULT_PATH
+    )
+    find_library(GGML_BASE_LIBRARY NAMES ggml-base
+        HINTS "${PREBUILT_DIR}/${TARGET_PLATFORM}/llama"
+        NO_DEFAULT_PATH
+    )
 endif()
 
 # Build dataset library
@@ -104,6 +112,41 @@ target_link_libraries(test_vectordb
 )
 
 target_compile_definitions(test_vectordb PRIVATE PROJECT_ROOT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/..")
+
+add_executable(test_command_line_args
+    ${CMAKE_CURRENT_SOURCE_DIR}/test_command_line_args.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/cli/CommandLineArgs.cpp
+)
+
+target_include_directories(test_command_line_args PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+)
+
+add_executable(test_llama_logging
+    ${CMAKE_CURRENT_SOURCE_DIR}/test_llama_logging.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/llm/LlamaCppLogging.cpp
+)
+
+target_include_directories(test_llama_logging PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+    ${PREBUILT_DIR}/include/llama
+)
+
+target_link_libraries(test_llama_logging PRIVATE
+    ${LLAMA_LIBRARY}
+    ${GGML_LIBRARY}
+    ${GGML_BASE_LIBRARY}
+)
+
+if(USE_PREBUILT)
+    set_target_properties(
+        test_command_line_args
+        test_llama_logging
+        PROPERTIES
+        BUILD_RPATH "${CMAKE_BUILD_RPATH}"
+        INSTALL_RPATH "${CMAKE_BUILD_RPATH}"
+    )
+endif()
 
 # Core RAG library (implementation files)
 add_library(rag_core STATIC
@@ -286,6 +329,8 @@ endif()
 
 # Enable testing
 enable_testing()
+add_test(NAME CommandLineArgsTest COMMAND test_command_line_args)
+add_test(NAME LlamaLoggingTest COMMAND test_llama_logging)
 add_test(NAME VectorDBTest COMMAND test_vectordb)
 add_test(NAME EmbeddingTest COMMAND test_embedding)
 add_test(NAME LLMTest COMMAND test_llm)
@@ -294,6 +339,8 @@ add_test(NAME RAGIntegrationTest COMMAND test_rag_integration)
 
 # Set test properties
 set_tests_properties(
+    CommandLineArgsTest
+    LlamaLoggingTest
     EmbeddingTest
     LLMTest
     VectorDBTest
@@ -303,6 +350,16 @@ set_tests_properties(
     TIMEOUT 120
     LABELS "integration"
 )
+
+if(USE_PREBUILT)
+    set_tests_properties(
+        LlamaLoggingTest
+        PROPERTIES
+        TIMEOUT 120
+        LABELS "integration"
+        ENVIRONMENT "LD_LIBRARY_PATH=${PREBUILT_DIR}/${TARGET_PLATFORM}/llama:$ENV{LD_LIBRARY_PATH}"
+    )
+endif()
 
 message(STATUS "Tests configured:")
 message(STATUS "  - test_embedding (Group A)")

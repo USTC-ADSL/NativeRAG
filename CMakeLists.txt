@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.15)
 
-project(MobileRAG LANGUAGES CXX)
+project(MobileRAG LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -104,34 +104,52 @@ target_include_directories(mobile_rag_cli
 ############
 # SQLite3 #
 ############
-find_package(SQLite3 REQUIRED)
-
 set(_SQLITE3_INCLUDE_DIRS "")
-if(SQLite3_INCLUDE_DIRS)
-  list(APPEND _SQLITE3_INCLUDE_DIRS ${SQLite3_INCLUDE_DIRS})
-endif()
-if(SQLite3_INCLUDE_DIR)
-  list(APPEND _SQLITE3_INCLUDE_DIRS ${SQLite3_INCLUDE_DIR})
-endif()
-list(REMOVE_DUPLICATES _SQLITE3_INCLUDE_DIRS)
-
 set(_SQLITE3_LIBRARIES "")
-if(SQLite3_LIBRARIES)
-  list(APPEND _SQLITE3_LIBRARIES ${SQLite3_LIBRARIES})
+set(_SQLITE3_SOURCES "")
+
+if(ANDROID)
+  # The NDK does not ship SQLite headers or a linkable sqlite stub, so bundle
+  # the vendored amalgamation for Android builds.
+  list(APPEND _SQLITE3_INCLUDE_DIRS
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/sqlite-vec/vendor"
+  )
+  list(APPEND _SQLITE3_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/sqlite-vec/vendor/sqlite3.c"
+  )
+else()
+  find_package(SQLite3 REQUIRED)
+
+  if(SQLite3_INCLUDE_DIRS)
+    list(APPEND _SQLITE3_INCLUDE_DIRS ${SQLite3_INCLUDE_DIRS})
+  endif()
+  if(SQLite3_INCLUDE_DIR)
+    list(APPEND _SQLITE3_INCLUDE_DIRS ${SQLite3_INCLUDE_DIR})
+  endif()
+
+  if(SQLite3_LIBRARIES)
+    list(APPEND _SQLITE3_LIBRARIES ${SQLite3_LIBRARIES})
+  endif()
+  if(SQLite3_LIBRARY)
+    list(APPEND _SQLITE3_LIBRARIES ${SQLite3_LIBRARY})
+  endif()
+
+  if (TARGET SQLite::SQLite3)
+    target_link_libraries(mobile_rag_cli PRIVATE SQLite::SQLite3)
+  endif()
 endif()
-if(SQLite3_LIBRARY)
-  list(APPEND _SQLITE3_LIBRARIES ${SQLite3_LIBRARY})
-endif()
+
+list(REMOVE_DUPLICATES _SQLITE3_INCLUDE_DIRS)
 list(REMOVE_DUPLICATES _SQLITE3_LIBRARIES)
 
-if (TARGET SQLite::SQLite3)
-  target_link_libraries(mobile_rag_cli PRIVATE SQLite::SQLite3)
-endif()
 if(_SQLITE3_LIBRARIES)
   target_link_libraries(mobile_rag_cli PRIVATE ${_SQLITE3_LIBRARIES})
 endif()
 if(_SQLITE3_INCLUDE_DIRS)
   target_include_directories(mobile_rag_cli PRIVATE ${_SQLITE3_INCLUDE_DIRS})
+endif()
+if(_SQLITE3_SOURCES)
+  target_sources(mobile_rag_cli PRIVATE ${_SQLITE3_SOURCES})
 endif()
 
 # Prebuilt third-party libraries (MNN and llama.cpp) in third_party/
@@ -374,6 +392,11 @@ elseif (LLM_BACKEND STREQUAL "LlamaCpp")
       NO_DEFAULT_PATH
       NO_CMAKE_FIND_ROOT_PATH
     )
+    find_library(GGML_BASE_LIBRARY NAMES ggml-base
+      HINTS "${LLAMA_PREBUILT_DIR}"
+      NO_DEFAULT_PATH
+      NO_CMAKE_FIND_ROOT_PATH
+    )
   else()
     # 使用 third_party 库
     message(STATUS "Looking for llama.cpp in third_party/")
@@ -386,6 +409,10 @@ elseif (LLM_BACKEND STREQUAL "LlamaCpp")
       NO_DEFAULT_PATH
     )
     find_library(GGML_LIBRARY NAMES ggml libggml
+      HINTS "${THIRD_PARTY_DIR}/llama.cpp" "${THIRD_PARTY_DIR}/llama.cpp/lib" "${THIRD_PARTY_DIR}/llama.cpp/build"
+      NO_DEFAULT_PATH
+    )
+    find_library(GGML_BASE_LIBRARY NAMES ggml-base libggml-base
       HINTS "${THIRD_PARTY_DIR}/llama.cpp" "${THIRD_PARTY_DIR}/llama.cpp/lib" "${THIRD_PARTY_DIR}/llama.cpp/build"
       NO_DEFAULT_PATH
     )
@@ -410,8 +437,13 @@ elseif (LLM_BACKEND STREQUAL "LlamaCpp")
   else()
     message(WARNING "ggml library not found. llama.cpp backend may fail to link.")
   endif()
+  if (GGML_BASE_LIBRARY)
+    message(STATUS "Found ggml-base library: ${GGML_BASE_LIBRARY}")
+    target_link_libraries(mobile_rag_cli PRIVATE "${GGML_BASE_LIBRARY}")
+  endif()
 
   target_sources(mobile_rag_cli PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/llm/LlamaCppLogging.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/llm/LlamaCppModel.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/llm/LLMFactory_Llama.cpp"
   )
@@ -491,6 +523,9 @@ endif()
 if(_SQLITE3_INCLUDE_DIRS)
   target_include_directories(mobile_rag_dataset PRIVATE ${_SQLITE3_INCLUDE_DIRS})
 endif()
+if(_SQLITE3_SOURCES)
+  target_sources(mobile_rag_dataset PRIVATE ${_SQLITE3_SOURCES})
+endif()
 if(MNN_LIBRARY)
   target_link_libraries(mobile_rag_dataset PRIVATE "${MNN_LIBRARY}")
 endif()
@@ -541,12 +576,16 @@ elseif (LLM_BACKEND STREQUAL "LlamaCpp")
   if(GGML_LIBRARY)
     target_link_libraries(mobile_rag_dataset PRIVATE ${GGML_LIBRARY})
   endif()
+  if(GGML_BASE_LIBRARY)
+    target_link_libraries(mobile_rag_dataset PRIVATE ${GGML_BASE_LIBRARY})
+  endif()
   if (LLAMA_INCLUDE_DIR)
     target_include_directories(mobile_rag_dataset PRIVATE "${LLAMA_INCLUDE_DIR}")
   endif()
   target_include_directories(mobile_rag_dataset PRIVATE "${THIRD_PARTY_DIR}/llama.cpp/include")
   target_include_directories(mobile_rag_dataset PRIVATE "${THIRD_PARTY_DIR}/llama.cpp/ggml/include")
   target_sources(mobile_rag_dataset PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/llm/LlamaCppLogging.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/llm/LlamaCppModel.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/llm/LLMFactory_Llama.cpp"
   )
@@ -603,6 +642,7 @@ endif()
 # 测试支持
 option(BUILD_TESTS "Build unit tests" ON)
 if(BUILD_TESTS)
+  enable_testing()
   add_subdirectory(tests)
 endif()
 

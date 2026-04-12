@@ -24,6 +24,14 @@ bool CommandLineArgs::parse() {
     return false;  // Help doesn't proceed with execution
   }
 
+  for (int i = 2; i < argc_; ++i) {
+    const std::string arg = argv_[i];
+    if (arg == "--help" || arg == "-h") {
+      print_help();
+      return false;
+    }
+  }
+
   // Parse options and positional arguments
   if (!parse_options()) {
     return false;
