@@ -36,6 +36,7 @@ class GraphSelector {
 
   struct Availability {
     bool sqlite_available = false;
+    bool dense_graph_available = true;
     bool lexical_graph_available = false;
     bool semantic_hash_graph_available = false;
   };

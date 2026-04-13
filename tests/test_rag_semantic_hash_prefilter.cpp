@@ -492,6 +492,138 @@ void test_state_aware_dense_skips_cold_shortlist_candidates() {
   std::filesystem::remove(db_path);
 }
 
+void test_state_aware_dense_only_skips_cold_dense_hits() {
+  const std::string db_path = make_temp_db_path("state-aware-dense-only");
+  std::filesystem::remove(db_path);
+
+  auto sqlite_db = std::make_shared<SqliteVectorDB>(db_path);
+  auto embedder = std::make_shared<FakeEmbeddingModel>();
+  auto index = std::make_shared<FakeVectorIndex>();
+  auto llm = std::make_shared<FakeLLM>();
+
+  TestableRAGPipeline pipeline(nullptr, embedder, index, llm, sqlite_db, 1, 128, 16);
+  pipeline.set_state_aware_dense({true});
+
+  const std::vector<std::string> texts = {
+      "Cold dense hit that should be filtered out.",
+      "Warm dense hit that should survive filtering.",
+  };
+  const std::vector<std::vector<float>> vectors = {
+      {1.0f, 0.0f},
+      {0.8f, 0.2f},
+  };
+  assert(pipeline.ingest(texts, vectors, "state-aware-dense-only-test"));
+  assert(sqlite_db->update_chunk_state(0, ChunkState::COLD, "manual_cold"));
+  assert(sqlite_db->get_chunk_state(0) == "cold");
+  assert(sqlite_db->get_chunk_state(1) == "warm");
+
+  const std::string query = "sqlite traces";
+  embedder->query_embeddings[query] = {1.0f, 0.0f};
+  index->search_results = {{0, 0.95f}, {1, 0.90f}};
+
+  const auto run = run_query_and_capture_stdout(pipeline, query);
+  assert(run.answer.find("Warm dense hit that should survive filtering.") !=
+         std::string::npos);
+  assert(run.stdout_text.find("state_filtered_candidates=1") != std::string::npos);
+  assert(index->last_k > 1);
+
+  const auto& trace = pipeline.last_query_trace();
+  assert(trace.initial_graph == "dense_only");
+  assert(trace.final_graph == "dense_only");
+  assert(trace.state_aware_dense_enabled);
+  assert(trace.state_filtered_candidate_count == 1);
+  assert(trace.fallback_reason == "none");
+
+  std::filesystem::remove(db_path);
+}
+
+void test_state_aware_dense_only_returns_empty_when_no_warm_or_hot_dense_hits_exist() {
+  const std::string db_path = make_temp_db_path("state-aware-dense-only-empty");
+  std::filesystem::remove(db_path);
+
+  auto sqlite_db = std::make_shared<SqliteVectorDB>(db_path);
+  auto embedder = std::make_shared<FakeEmbeddingModel>();
+  auto index = std::make_shared<FakeVectorIndex>();
+  auto llm = std::make_shared<FakeLLM>();
+
+  TestableRAGPipeline pipeline(nullptr, embedder, index, llm, sqlite_db, 1, 128, 16);
+  pipeline.set_state_aware_dense({true});
+
+  const std::vector<std::string> texts = {
+      "Only cold dense hit remains in the index.",
+  };
+  const std::vector<std::vector<float>> vectors = {
+      {1.0f, 0.0f},
+  };
+  assert(pipeline.ingest(texts, vectors, "state-aware-dense-only-empty-test"));
+  assert(sqlite_db->update_chunk_state(0, ChunkState::COLD, "manual_cold"));
+  assert(sqlite_db->get_chunk_state(0) == "cold");
+
+  const std::string query = "cold dense";
+  embedder->query_embeddings[query] = {1.0f, 0.0f};
+  index->search_results = {{0, 0.95f}};
+
+  const auto run = run_query_and_capture_stdout(pipeline, query);
+  assert(run.answer.empty());
+  assert(run.stdout_text.find("fallback=state_filtered_dense_only_empty") !=
+         std::string::npos);
+
+  const auto& trace = pipeline.last_query_trace();
+  assert(trace.final_graph == "dense_only");
+  assert(trace.state_aware_dense_enabled);
+  assert(trace.state_filtered_candidate_count == 1);
+  assert(trace.dense_result_count == 0);
+  assert(trace.fallback_reason == "state_filtered_dense_only_empty");
+
+  std::filesystem::remove(db_path);
+}
+
+void test_adaptive_graph_avoids_dense_only_when_state_aware_dense_has_no_warm_candidates() {
+  const std::string db_path = make_temp_db_path("adaptive-state-aware-dense-empty");
+  std::filesystem::remove(db_path);
+
+  auto sqlite_db = std::make_shared<SqliteVectorDB>(db_path);
+  auto embedder = std::make_shared<FakeEmbeddingModel>();
+  auto index = std::make_shared<FakeVectorIndex>();
+  auto llm = std::make_shared<FakeLLM>();
+
+  TestableRAGPipeline pipeline(nullptr, embedder, index, llm, sqlite_db, 1, 128, 16);
+  pipeline.set_state_aware_dense({true});
+  pipeline.set_graph_selector_config({true, 3, 0.15f, 0.50f});
+  pipeline.set_lexical_prefilter({true, 1});
+
+  const std::vector<std::string> texts = {
+      "Only cold lexical candidate remains.",
+  };
+  const std::vector<std::vector<float>> vectors = {
+      {1.0f, 0.0f},
+  };
+  assert(pipeline.ingest(texts, vectors, "adaptive-state-aware-dense-empty-test"));
+  assert(sqlite_db->update_chunk_state(0, ChunkState::COLD, "manual_cold"));
+  assert(sqlite_db->get_chunk_state(0) == "cold");
+
+  const std::string query = "cold lexical";
+  embedder->query_embeddings[query] = {1.0f, 0.0f};
+  index->search_results = {{0, 0.95f}};
+
+  const auto run = run_query_and_capture_stdout(pipeline, query);
+  assert(run.stdout_text.find("initial_graph=lexical_prefilter") != std::string::npos);
+  assert(run.stdout_text.find("reason=dense_state_unavailable") != std::string::npos);
+  assert(run.answer.empty());
+  assert(run.stdout_text.find("fallback=state_filtered_shortlist_empty") !=
+         std::string::npos);
+  assert(run.stdout_text.find("dense_results=0") != std::string::npos);
+
+  const auto& trace = pipeline.last_query_trace();
+  assert(trace.initial_graph == "lexical_prefilter");
+  assert(trace.initial_reason == "dense_state_unavailable");
+  assert(trace.state_aware_dense_enabled);
+  assert(trace.fallback_reason == "state_filtered_shortlist_empty");
+  assert(trace.dense_result_count == 0);
+
+  std::filesystem::remove(db_path);
+}
+
 }  // namespace
 
 int main() {
@@ -501,5 +633,8 @@ int main() {
   test_adaptive_graph_logs_controller_selection();
   test_query_promotes_new_hit_and_demotes_previous_hot_chunk();
   test_state_aware_dense_skips_cold_shortlist_candidates();
+  test_state_aware_dense_only_skips_cold_dense_hits();
+  test_state_aware_dense_only_returns_empty_when_no_warm_or_hot_dense_hits_exist();
+  test_adaptive_graph_avoids_dense_only_when_state_aware_dense_has_no_warm_candidates();
   return 0;
 }

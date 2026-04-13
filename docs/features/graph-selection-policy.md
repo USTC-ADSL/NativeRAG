@@ -22,6 +22,7 @@ This keeps the paper story intact:
   - `tight`
   - `balanced`
   - `relaxed`
+- When state-aware dense mode is active, the controller also checks whether SQLite currently exposes any `warm` / `hot` dense-eligible chunk before choosing `dense_only`.
 - When evidence looks weak after the first retrieval pass, the controller can upgrade to a richer graph and rerun retrieval before prompt construction.
 - When lexical coverage looks strong but constraint-like query tokens remain uncovered, the controller can still escalate instead of treating the evidence as sufficient.
 - Query traces now emit `[CONTROLLER]` lines alongside the existing `[RETRIEVAL]` and `[EVIDENCE]` logs.
@@ -35,6 +36,8 @@ This keeps the paper story intact:
   - under a tight shortlist budget, numeric queries stay on `lexical_prefilter` instead of paying for the merged graph
   - term-rich queries prefer `lexical_prefilter`
   - short content-bearing queries prefer `semantic_hash_prefilter`
+  - if state-aware dense is enabled and SQLite reports no current `warm` / `hot` chunk, the controller avoids starting from `dense_only` when a SQLite-backed graph exists
+  - if a query somehow still reaches `dense_only` while dense is state-unavailable, the controller upgrades to the richest available SQLite-backed graph instead of treating the dense path as a valid steady state
   - unresolved numeric or entity-like query constraints can force a richer graph even when score margin and lexical coverage look acceptable
   - low evidence can trigger an upgrade to a richer graph
   - under a tight shortlist budget, evidence-based upgrades are skipped
@@ -70,6 +73,7 @@ This keeps the paper story intact:
 3. If `--adaptive-graph` is enabled:
    - `GraphSelector` derives simple query features from the query text
    - `GraphSelector` derives a retrieval-budget class from `top-k`, `lexical_candidate_limit`, and `semantic_hash_candidate_limit`
+   - when state-aware dense is active, `RAGPipeline` also derives a binary dense-availability signal from the current SQLite chunk-state summary
    - the controller picks the cheapest currently available graph
 4. `RAGPipeline` executes the selected graph:
    - dense only
@@ -97,6 +101,7 @@ This keeps the paper story intact:
 
 - If `--adaptive-graph` is disabled, the repo stays on the previous static retrieval behavior.
 - If SQLite is unavailable, the adaptive controller falls back to `dense_only`.
+- If state-aware dense is enabled and SQLite reports no `warm` / `hot` chunk, the adaptive controller avoids `dense_only` when lexical or semantic SQLite graphs are available.
 - If a requested shortlist is empty, retrieval falls back to dense search as before.
 - If the SQLite shortlist rerank returns no results, retrieval falls back to dense search as before.
 - If the controller already selected the richest currently available graph, no further upgrade is attempted.
@@ -115,6 +120,9 @@ This patch only changes query-time graph selection and logging. It does not chan
   - selection reason
   - escalation source and destination when triggered
   - final graph
+- New selection / escalation reasons related to state-aware dense availability:
+  - `dense_state_unavailable`
+  - `dense_state_unavailable_upgrade`
 - Existing `[RETRIEVAL]` and `[EVIDENCE]` logs remain in place and now describe the final graph execution.
 
 ## How to test / reproduce
@@ -129,11 +137,13 @@ This patch only changes query-time graph selection and logging. It does not chan
    - expect `[CONTROLLER]` logs before `[RETRIEVAL]`
    - expect a `budget=tight|balanced|relaxed` field in the controller logs
    - expect the final retrieval graph to remain one of the existing baseline graphs
+   - with `--state-aware-dense` and an imported snapshot whose chunks are all `cold`, expect the controller to log `reason=dense_state_unavailable` instead of starting from `dense_only`
 
 ## Known limitations / TODOs
 
 - The current controller is heuristic and uses only simple query/evidence features.
 - Budget signals are still shortlist-size proxies; there is no thermal or energy-aware policy yet.
+- Dense availability is currently summary-based, not query-specific; the controller only knows whether any `warm` / `hot` chunk exists at all.
 - Evidence-based upgrading is single-step only; there is no multi-hop escalation chain yet.
 - Thresholds are fixed in code.
 - The final rerank still uses the existing dense rerank implementation; this patch does not change the inner xPU placement logic.

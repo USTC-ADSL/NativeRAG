@@ -58,6 +58,10 @@ bool semantic_available(const GraphSelector::Availability& availability) {
   return availability.sqlite_available && availability.semantic_hash_graph_available;
 }
 
+bool dense_available(const GraphSelector::Availability& availability) {
+  return availability.dense_graph_available;
+}
+
 }  // namespace
 
 const char* retrieval_graph_name(RetrievalGraph graph) {
@@ -135,6 +139,7 @@ GraphSelector::Decision GraphSelector::choose_initial_graph(
 
   const bool lexical = lexical_available(availability);
   const bool semantic = semantic_available(availability);
+  const bool dense = dense_available(availability);
   const int query_term_count = static_cast<int>(tokenize_terms(query).size());
   const bool numeric_query = has_numeric_token(query);
   const auto budget_class = classify_budget(availability, budget);
@@ -165,11 +170,24 @@ GraphSelector::Decision GraphSelector::choose_initial_graph(
     if (query_term_count >= config_.lexical_query_term_threshold) {
       return {RetrievalGraph::LEXICAL_PREFILTER, "lexical_only_available", false};
     }
+    if (!dense) {
+      return {RetrievalGraph::LEXICAL_PREFILTER, "dense_state_unavailable", false};
+    }
     return {RetrievalGraph::DENSE_ONLY, "query_too_short_for_lexical", false};
   }
 
   if (query_term_count > 0) {
     return {RetrievalGraph::SEMANTIC_HASH_PREFILTER, "semantic_only_available", false};
+  }
+
+  if (!dense && semantic) {
+    return {RetrievalGraph::SEMANTIC_HASH_PREFILTER, "dense_state_unavailable", false};
+  }
+
+  if (!dense) {
+    return {RetrievalGraph::DENSE_ONLY,
+            availability.sqlite_available ? "dense_state_unavailable" : "sqlite_unavailable",
+            false};
   }
 
   return {RetrievalGraph::DENSE_ONLY, "no_content_terms", false};
@@ -186,6 +204,22 @@ GraphSelector::Decision GraphSelector::maybe_escalate(
 
   if (current_graph == RetrievalGraph::LEXICAL_HASH_PREFILTER) {
     return {current_graph, "already_richest_graph", false};
+  }
+
+  const bool lexical = lexical_available(availability);
+  const bool semantic = semantic_available(availability);
+  const bool dense = dense_available(availability);
+
+  if (current_graph == RetrievalGraph::DENSE_ONLY && !dense) {
+    if (lexical && semantic) {
+      return {RetrievalGraph::LEXICAL_HASH_PREFILTER, "dense_state_unavailable_upgrade", true};
+    }
+    if (lexical) {
+      return {RetrievalGraph::LEXICAL_PREFILTER, "dense_state_unavailable_upgrade", true};
+    }
+    if (semantic) {
+      return {RetrievalGraph::SEMANTIC_HASH_PREFILTER, "dense_state_unavailable_upgrade", true};
+    }
   }
 
   const bool unresolved_constraints =
@@ -224,9 +258,6 @@ GraphSelector::Decision GraphSelector::maybe_escalate(
   if (classify_budget(availability, budget) == BudgetClass::TIGHT) {
     return {current_graph, "budget_limited", false};
   }
-
-  const bool lexical = lexical_available(availability);
-  const bool semantic = semantic_available(availability);
 
   if (lexical && semantic) {
     return {RetrievalGraph::LEXICAL_HASH_PREFILTER, "low_evidence_upgrade", true};

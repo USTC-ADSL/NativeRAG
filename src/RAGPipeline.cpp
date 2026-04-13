@@ -187,6 +187,32 @@ uint64_t current_peak_rss_kb() {
   return static_cast<uint64_t>(usage.ru_maxrss);
 }
 
+constexpr int kStateAwareDenseMinSearchCandidates = 32;
+constexpr int kStateAwareDenseSearchFactor = 8;
+
+std::vector<std::pair<int64_t, float>> filter_ranked_results_by_chunk_states(
+    const std::vector<std::pair<int64_t, float>>& ranked_results,
+    const std::vector<int64_t>& allowed_ids,
+    int top_k) {
+  std::vector<std::pair<int64_t, float>> filtered_results;
+  if (ranked_results.empty() || allowed_ids.empty() || top_k <= 0) {
+    return filtered_results;
+  }
+
+  std::unordered_set<int64_t> allowed_set(allowed_ids.begin(), allowed_ids.end());
+  filtered_results.reserve(std::min(static_cast<int>(ranked_results.size()), top_k));
+  for (const auto& result : ranked_results) {
+    if (allowed_set.count(result.first) == 0) {
+      continue;
+    }
+    filtered_results.push_back(result);
+    if (static_cast<int>(filtered_results.size()) >= top_k) {
+      break;
+    }
+  }
+  return filtered_results;
+}
+
 std::string serialize_query_trace_json(const RAGPipeline::QueryTrace& trace, bool pretty) {
   const std::string newline = pretty ? "\n" : "";
   const std::string colon = pretty ? ": " : ":";
@@ -718,6 +744,12 @@ std::string RAGPipeline::answer_query(const std::string& query) {
 
   GraphSelector::Availability availability;
   availability.sqlite_available = sqlite_db_ != nullptr;
+  availability.dense_graph_available = true;
+  if (state_aware_dense_.enabled && sqlite_db_) {
+    const auto state_summary = sqlite_db_->get_chunk_state_summary();
+    availability.dense_graph_available =
+        state_summary.hot_count > 0 || state_summary.warm_count > 0;
+  }
   availability.lexical_graph_available = lexical_prefilter_.enabled;
   availability.semantic_hash_graph_available = semantic_hash_prefilter_.enabled;
   GraphSelector::BudgetContext budget_context;
@@ -758,11 +790,46 @@ std::string RAGPipeline::answer_query(const std::string& query) {
               << " reason=" << initial_decision.reason << '\n';
   }
 
+  auto execute_dense_search = [&]() {
+    RetrievalExecution dense_execution;
+    dense_execution.fallback_reason = "none";
+    int dense_candidate_limit = top_k_;
+    if (state_aware_dense_.enabled && sqlite_db_) {
+      dense_candidate_limit = std::max(
+          top_k_,
+          std::max(kStateAwareDenseMinSearchCandidates,
+                   top_k_ * kStateAwareDenseSearchFactor));
+    }
+
+    const auto dense_results = index_->search(q, dense_candidate_limit);
+    if (!state_aware_dense_.enabled || !sqlite_db_ || dense_results.empty()) {
+      dense_execution.results = dense_results;
+      return dense_execution;
+    }
+
+    std::vector<int64_t> dense_candidate_ids;
+    dense_candidate_ids.reserve(dense_results.size());
+    for (const auto& [id, /*score*/ _] : dense_results) {
+      dense_candidate_ids.push_back(id);
+    }
+
+    const auto eligible_dense_ids = sqlite_db_->filter_ids_by_chunk_states(
+        dense_candidate_ids, {ChunkState::WARM, ChunkState::HOT});
+    dense_execution.state_filtered_candidate_count =
+        dense_candidate_ids.size() - eligible_dense_ids.size();
+    dense_execution.results =
+        filter_ranked_results_by_chunk_states(dense_results, eligible_dense_ids, top_k_);
+    if (dense_execution.results.empty() &&
+        dense_execution.state_filtered_candidate_count > 0) {
+      dense_execution.fallback_reason = "state_filtered_dense_only_empty";
+    }
+    return dense_execution;
+  };
+
   auto execute_retrieval = [&](RetrievalGraph graph) {
     RetrievalExecution execution;
     if (graph == RetrievalGraph::DENSE_ONLY) {
-      execution.results = index_->search(q, top_k_);
-      return execution;
+      return execute_dense_search();
     }
 
     if (!sqlite_db_) {
@@ -829,7 +896,8 @@ std::string RAGPipeline::answer_query(const std::string& query) {
     }
 
     if (execution.results.empty()) {
-      execution.results = index_->search(q, top_k_);
+      const auto dense_fallback = execute_dense_search();
+      execution.results = dense_fallback.results;
     }
 
     return execution;

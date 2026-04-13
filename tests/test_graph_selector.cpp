@@ -9,11 +9,13 @@ namespace {
 
 mobile_rag::GraphSelector::Availability make_availability(bool sqlite_available,
                                                           bool lexical_available,
-                                                          bool semantic_available) {
+                                                          bool semantic_available,
+                                                          bool dense_available = true) {
   mobile_rag::GraphSelector::Availability availability;
   availability.sqlite_available = sqlite_available;
   availability.lexical_graph_available = lexical_available;
   availability.semantic_hash_graph_available = semantic_available;
+  availability.dense_graph_available = dense_available;
   return availability;
 }
 
@@ -145,6 +147,19 @@ void test_budget_limited_weak_evidence_skips_upgrade() {
   assert(!decision.escalated);
 }
 
+void test_avoids_dense_only_when_state_aware_dense_is_unavailable() {
+  mobile_rag::GraphSelector selector({true, 3, 0.15f, 0.50f});
+
+  const auto decision = selector.choose_initial_graph(
+      "sqlite traces",
+      make_availability(true, true, false, false),
+      make_budget(1, 1, 0));
+
+  assert(decision.graph == mobile_rag::RetrievalGraph::LEXICAL_PREFILTER);
+  assert(decision.reason == "dense_state_unavailable");
+  assert(!decision.escalated);
+}
+
 }  // namespace
 
 int main() {
@@ -155,6 +170,7 @@ int main() {
   test_escalates_when_numeric_constraint_is_uncovered();
   test_budget_limited_numeric_queries_avoid_merged_graph();
   test_budget_limited_weak_evidence_skips_upgrade();
+  test_avoids_dense_only_when_state_aware_dense_is_unavailable();
   std::cout << "GraphSelector tests passed\n";
   return 0;
 }
