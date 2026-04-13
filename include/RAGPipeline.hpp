@@ -29,6 +29,36 @@ class RAGPipeline {
     int candidate_limit = 16;
   };
 
+  struct QueryTraceResult {
+    int64_t id = -1;
+    float score = 0.0f;
+    std::string preview;
+  };
+
+  struct QueryTrace {
+    std::string query;
+    std::string answer;
+    bool adaptive_graph_enabled = false;
+    std::string budget_class = "tight";
+    std::string initial_graph = "dense_only";
+    std::string final_graph = "dense_only";
+    std::string initial_reason = "adaptive_disabled";
+    std::string final_reason = "adaptive_disabled";
+    bool escalated = false;
+    std::string escalation_from;
+    std::string escalation_to;
+    std::string escalation_reason;
+    size_t lexical_candidate_count = 0;
+    size_t hash_candidate_count = 0;
+    size_t dense_result_count = 0;
+    std::string fallback_reason = "prefilter_disabled";
+    int promoted_to_hot = 0;
+    int demoted_to_warm = 0;
+    ChunkStateSummary index_state;
+    EvidenceFeatures evidence;
+    std::vector<QueryTraceResult> results;
+  };
+
   RAGPipeline(std::shared_ptr<IDocumentLoader> loader,
               std::shared_ptr<IEmbeddingModel> embedder,
               std::shared_ptr<IVectorIndex> index,
@@ -63,6 +93,8 @@ class RAGPipeline {
    * Step 4-7: 查询向量化、向量检索、上下文拼接、LLM推理
    */
   std::string answer_query(const std::string& query);
+  const QueryTrace& last_query_trace() const { return last_query_trace_; }
+  bool export_last_query_trace(const std::string& output_path) const;
 
   void set_semantic_hash_prefilter(SemanticHashPrefilterConfig config);
   void set_lexical_prefilter(LexicalPrefilterConfig config);
@@ -87,6 +119,8 @@ class RAGPipeline {
   SemanticHashPrefilterConfig semantic_hash_prefilter_;
   LexicalPrefilterConfig lexical_prefilter_;
   GraphSelector graph_selector_;
+  QueryTrace last_query_trace_;
+  bool has_last_query_trace_ = false;
 };
 
 }  // namespace mobile_rag

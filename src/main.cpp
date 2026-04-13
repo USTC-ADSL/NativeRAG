@@ -105,6 +105,9 @@ int main(int argc, char** argv) {
               << "  State Snapshot Out: "
               << (config.state_snapshot_out_path.empty() ? "(none)"
                                                          : config.state_snapshot_out_path) << '\n'
+              << "  Query Trace Out: "
+              << (config.query_trace_out_path.empty() ? "(none)"
+                                                      : config.query_trace_out_path) << '\n'
               << "  Chunk Size: " << config.chunk_size << '\n'
               << "  Chunk Overlap: " << config.chunk_overlap << '\n';
   }
@@ -281,6 +284,16 @@ int main(int argc, char** argv) {
     }
     std::string answer = pipeline.answer_query(config.query);
     std::cout << answer << '\n';
+
+    if (!config.query_trace_out_path.empty()) {
+      if (!pipeline.export_last_query_trace(config.query_trace_out_path)) {
+        std::cerr << "[ERROR] Failed to export query trace: "
+                  << config.query_trace_out_path << '\n';
+        return 1;
+      }
+      std::cout << "✓ Query trace exported to: "
+                << config.query_trace_out_path << '\n';
+    }
 
     if (!config.state_snapshot_out_path.empty()) {
       if (!sqlite_db->export_chunk_state_snapshot(config.state_snapshot_out_path)) {

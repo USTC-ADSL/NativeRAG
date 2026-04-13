@@ -1,5 +1,6 @@
 #include <cassert>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <sstream>
@@ -224,7 +225,9 @@ void test_lexical_and_hash_shortlists_are_merged_before_dense_rerank() {
 
 void test_adaptive_graph_logs_controller_selection() {
   const std::string db_path = make_temp_db_path("adaptive-controller");
+  const std::string trace_path = "/tmp/native_rag_query_trace.json";
   std::filesystem::remove(db_path);
+  std::filesystem::remove(trace_path);
 
   auto sqlite_db = std::make_shared<SqliteVectorDB>(db_path);
   auto embedder = std::make_shared<FakeEmbeddingModel>();
@@ -260,8 +263,42 @@ void test_adaptive_graph_logs_controller_selection() {
   assert(run.stdout_text.find("reason=term_rich_query") != std::string::npos);
   assert(sqlite_db->get_chunk_state(1) == "hot");
   assert(sqlite_db->count_chunk_state_transitions(1) == 2);
+  const auto& trace = pipeline.last_query_trace();
+  assert(trace.query == query);
+  assert(trace.initial_graph == "lexical_prefilter");
+  assert(trace.final_graph == "lexical_prefilter");
+  assert(trace.budget_class == "tight");
+  assert(trace.initial_reason == "term_rich_query");
+  assert(trace.final_reason == "evidence_sufficient");
+  assert(trace.lexical_candidate_count == 1);
+  assert(trace.hash_candidate_count == 0);
+  assert(trace.dense_result_count == 1);
+  assert(trace.fallback_reason == "none");
+  assert(trace.promoted_to_hot == 1);
+  assert(trace.demoted_to_warm == 0);
+  assert(trace.index_state.hot_count == 1);
+  assert(trace.index_state.warm_count == 1);
+  assert(trace.index_state.cold_count == 0);
+  assert(trace.index_state.transition_count == 3);
+  assert(trace.evidence.retrieved_chunk_count == 1);
+  assert(trace.results.size() == 1);
+  assert(trace.results[0].id == 1);
+  assert(trace.results[0].score > 0.0f);
+  assert(pipeline.export_last_query_trace(trace_path));
+
+  std::ifstream trace_stream(trace_path);
+  std::string trace_json((std::istreambuf_iterator<char>(trace_stream)),
+                         std::istreambuf_iterator<char>());
+  assert(trace_json.find("\"query\":\"sqlite metadata retrieval traces\"") != std::string::npos);
+  assert(trace_json.find("\"initial_graph\":\"lexical_prefilter\"") != std::string::npos);
+  assert(trace_json.find("\"final_graph\":\"lexical_prefilter\"") != std::string::npos);
+  assert(trace_json.find("\"budget_class\":\"tight\"") != std::string::npos);
+  assert(trace_json.find("\"promoted_to_hot\":1") != std::string::npos);
+  assert(trace_json.find("\"hot\":1") != std::string::npos);
+  assert(trace_json.find("\"transition_count\":3") != std::string::npos);
 
   std::filesystem::remove(db_path);
+  std::filesystem::remove(trace_path);
 }
 
 void test_query_promotes_new_hit_and_demotes_previous_hot_chunk() {

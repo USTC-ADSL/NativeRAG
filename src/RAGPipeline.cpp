@@ -2,8 +2,10 @@
 
 #include <algorithm>
 #include <cctype>
-#include <iostream>
+#include <fstream>
 #include <iomanip>
+#include <iostream>
+#include <sstream>
 #include <unordered_set>
 
 #include "controller/EvidenceFeatures.hpp"
@@ -93,6 +95,52 @@ std::string fallback_answer_from_chunks(const std::string& query,
   return trim_copy(chunks.front());
 }
 
+std::string make_chunk_preview(const std::string& chunk) {
+  std::string preview = chunk.substr(0, 120);
+  for (char& c : preview) {
+    if (c == '\n' || c == '\r' || c == '\t') c = ' ';
+  }
+  return preview;
+}
+
+std::string json_escape(const std::string& input) {
+  std::ostringstream escaped;
+  for (const unsigned char ch : input) {
+    switch (ch) {
+      case '\\':
+        escaped << "\\\\";
+        break;
+      case '"':
+        escaped << "\\\"";
+        break;
+      case '\b':
+        escaped << "\\b";
+        break;
+      case '\f':
+        escaped << "\\f";
+        break;
+      case '\n':
+        escaped << "\\n";
+        break;
+      case '\r':
+        escaped << "\\r";
+        break;
+      case '\t':
+        escaped << "\\t";
+        break;
+      default:
+        if (ch < 0x20) {
+          escaped << "\\u" << std::hex << std::setw(4) << std::setfill('0')
+                  << static_cast<int>(ch) << std::dec << std::setfill(' ');
+        } else {
+          escaped << static_cast<char>(ch);
+        }
+        break;
+    }
+  }
+  return escaped.str();
+}
+
 struct RetrievalExecution {
   std::vector<std::pair<int64_t, float>> results;
   size_t lexical_candidate_count = 0;
@@ -148,6 +196,75 @@ void RAGPipeline::set_lexical_prefilter(LexicalPrefilterConfig config) {
 
 void RAGPipeline::set_graph_selector_config(GraphSelector::Config config) {
   graph_selector_.set_config(config);
+}
+
+bool RAGPipeline::export_last_query_trace(const std::string& output_path) const {
+  if (!has_last_query_trace_ || output_path.empty()) {
+    return false;
+  }
+
+  std::ofstream out(output_path, std::ios::trunc);
+  if (!out) {
+    return false;
+  }
+
+  out << "{\n"
+      << "  \"query\":\"" << json_escape(last_query_trace_.query) << "\",\n"
+      << "  \"answer\":\"" << json_escape(last_query_trace_.answer) << "\",\n"
+      << "  \"adaptive_graph_enabled\":"
+      << (last_query_trace_.adaptive_graph_enabled ? "true" : "false") << ",\n"
+      << "  \"budget_class\":\"" << json_escape(last_query_trace_.budget_class) << "\",\n"
+      << "  \"initial_graph\":\"" << json_escape(last_query_trace_.initial_graph) << "\",\n"
+      << "  \"final_graph\":\"" << json_escape(last_query_trace_.final_graph) << "\",\n"
+      << "  \"initial_reason\":\"" << json_escape(last_query_trace_.initial_reason) << "\",\n"
+      << "  \"final_reason\":\"" << json_escape(last_query_trace_.final_reason) << "\",\n"
+      << "  \"escalated\":"
+      << (last_query_trace_.escalated ? "true" : "false") << ",\n"
+      << "  \"escalation_from\":\"" << json_escape(last_query_trace_.escalation_from) << "\",\n"
+      << "  \"escalation_to\":\"" << json_escape(last_query_trace_.escalation_to) << "\",\n"
+      << "  \"escalation_reason\":\"" << json_escape(last_query_trace_.escalation_reason)
+      << "\",\n"
+      << "  \"lexical_candidate_count\":" << last_query_trace_.lexical_candidate_count << ",\n"
+      << "  \"hash_candidate_count\":" << last_query_trace_.hash_candidate_count << ",\n"
+      << "  \"dense_result_count\":" << last_query_trace_.dense_result_count << ",\n"
+      << "  \"fallback_reason\":\"" << json_escape(last_query_trace_.fallback_reason)
+      << "\",\n"
+      << "  \"promoted_to_hot\":" << last_query_trace_.promoted_to_hot << ",\n"
+      << "  \"demoted_to_warm\":" << last_query_trace_.demoted_to_warm << ",\n"
+      << "  \"index_state\":{\n"
+      << "    \"hot\":" << last_query_trace_.index_state.hot_count << ",\n"
+      << "    \"warm\":" << last_query_trace_.index_state.warm_count << ",\n"
+      << "    \"cold\":" << last_query_trace_.index_state.cold_count << ",\n"
+      << "    \"transition_count\":" << last_query_trace_.index_state.transition_count << "\n"
+      << "  },\n"
+      << "  \"evidence\":{\n"
+      << "    \"top_score\":" << last_query_trace_.evidence.top_score << ",\n"
+      << "    \"second_score\":" << last_query_trace_.evidence.second_score << ",\n"
+      << "    \"score_margin\":" << last_query_trace_.evidence.score_margin << ",\n"
+      << "    \"score_sharpness\":" << last_query_trace_.evidence.score_sharpness << ",\n"
+      << "    \"retrieved_chunk_count\":"
+      << last_query_trace_.evidence.retrieved_chunk_count << ",\n"
+      << "    \"query_term_count\":" << last_query_trace_.evidence.query_term_count << ",\n"
+      << "    \"covered_query_terms\":"
+      << last_query_trace_.evidence.covered_query_terms << ",\n"
+      << "    \"coverage_ratio\":" << last_query_trace_.evidence.coverage_ratio << "\n"
+      << "  },\n"
+      << "  \"results\":[\n";
+
+  for (size_t i = 0; i < last_query_trace_.results.size(); ++i) {
+    const auto& result = last_query_trace_.results[i];
+    out << "    {\"id\":" << result.id
+        << ",\"score\":" << result.score
+        << ",\"preview\":\"" << json_escape(result.preview) << "\"}";
+    if (i + 1 < last_query_trace_.results.size()) {
+      out << ",";
+    }
+    out << "\n";
+  }
+
+  out << "  ]\n"
+      << "}\n";
+  return static_cast<bool>(out);
 }
 
 bool RAGPipeline::add_text_embeddings(const std::vector<std::string>& texts,
@@ -333,6 +450,9 @@ bool RAGPipeline::load_index(const std::string& index_path) {
 }
 
 std::string RAGPipeline::answer_query(const std::string& query) {
+  last_query_trace_ = QueryTrace{};
+  has_last_query_trace_ = false;
+
   if (!embedder_) {
     std::cerr << "[RAGPipeline] Embedder is not initialized." << '\n';
     return {};
@@ -367,13 +487,20 @@ std::string RAGPipeline::answer_query(const std::string& query) {
                                                      ? semantic_hash_prefilter_.candidate_limit
                                                      : 0;
   const auto budget_class = graph_selector_.classify_budget(availability, budget_context);
+  QueryTrace query_trace;
+  query_trace.query = query;
+  query_trace.adaptive_graph_enabled = graph_selector_.config().enabled;
+  query_trace.budget_class = budget_class_name(budget_class);
 
   RetrievalGraph active_graph =
       graph_from_prefilter_flags(lexical_prefilter_.enabled, semantic_hash_prefilter_.enabled);
+  query_trace.initial_graph = retrieval_graph_name(active_graph);
   if (graph_selector_.config().enabled) {
     const auto initial_decision =
         graph_selector_.choose_initial_graph(query, availability, budget_context);
     active_graph = initial_decision.graph;
+    query_trace.initial_graph = retrieval_graph_name(active_graph);
+    query_trace.initial_reason = initial_decision.reason;
     std::cout << "[CONTROLLER] adaptive=on initial_graph="
               << retrieval_graph_name(active_graph)
               << " budget=" << budget_class_name(budget_class)
@@ -478,6 +605,10 @@ std::string RAGPipeline::answer_query(const std::string& query) {
             active_graph, availability, budget_context, evidence_features);
     final_controller_reason = escalation.reason;
     if (escalation.escalated && escalation.graph != active_graph) {
+      query_trace.escalated = true;
+      query_trace.escalation_from = retrieval_graph_name(active_graph);
+      query_trace.escalation_to = retrieval_graph_name(escalation.graph);
+      query_trace.escalation_reason = escalation.reason;
       std::cout << "[CONTROLLER] escalate_from=" << retrieval_graph_name(active_graph)
                 << " to=" << retrieval_graph_name(escalation.graph)
                 << " budget=" << budget_class_name(budget_class)
@@ -495,12 +626,18 @@ std::string RAGPipeline::answer_query(const std::string& query) {
               << " budget=" << budget_class_name(budget_class)
               << " reason=" << final_controller_reason << '\n';
   }
+  query_trace.final_graph = retrieval_graph_name(active_graph);
+  query_trace.final_reason = final_controller_reason;
 
   std::cout << "[RETRIEVAL] mode=" << retrieval_graph_name(active_graph)
             << " lexical_candidates=" << execution.lexical_candidate_count
             << " hash_candidates=" << execution.hash_candidate_count
             << " dense_results=" << execution.results.size()
             << " fallback=" << execution.fallback_reason << '\n';
+  query_trace.lexical_candidate_count = execution.lexical_candidate_count;
+  query_trace.hash_candidate_count = execution.hash_candidate_count;
+  query_trace.dense_result_count = execution.results.size();
+  query_trace.fallback_reason = execution.fallback_reason;
 
   // Print query and retrieval results for debugging/inspection
   std::cout << "\n[QUERY] " << query << '\n';
@@ -511,12 +648,10 @@ std::string RAGPipeline::answer_query(const std::string& query) {
   for (size_t rank = 0; rank < execution.results.size(); ++rank) {
     const auto& [id, score] = execution.results[rank];
     const auto& chunk = retrieved_chunks[rank];
+    const std::string preview = chunk.empty() ? std::string() : make_chunk_preview(chunk);
+    query_trace.results.push_back({id, score, preview});
 
     if (!chunk.empty()) {
-      std::string preview = chunk.substr(0, 120);
-      for (char& c : preview) {
-        if (c == '\n' || c == '\r' || c == '\t') c = ' ';
-      }
       std::cout << "[TOP-" << (rank + 1) << "] id=" << id
                 << " score=" << std::fixed << std::setprecision(4) << score
                 << " | " << preview << (chunk.size() > 120 ? "..." : "") << '\n';
@@ -547,11 +682,14 @@ std::string RAGPipeline::answer_query(const std::string& query) {
     std::cout << "[INDEX_STATE] promoted_to_hot=" << promoted_to_hot
               << " demoted_to_warm=" << demoted_to_warm
               << " retrieved_chunks=" << execution.results.size() << '\n';
+    query_trace.promoted_to_hot = promoted_to_hot;
+    query_trace.demoted_to_warm = demoted_to_warm;
     const auto state_summary = sqlite_db_->get_chunk_state_summary();
     std::cout << "[INDEX_STATE_SUMMARY] hot=" << state_summary.hot_count
               << " warm=" << state_summary.warm_count
               << " cold=" << state_summary.cold_count
               << " transitions=" << state_summary.transition_count << '\n';
+    query_trace.index_state = state_summary;
   }
 
   std::cout << "[EVIDENCE] top_score=" << std::fixed << std::setprecision(4)
@@ -570,6 +708,10 @@ std::string RAGPipeline::answer_query(const std::string& query) {
   if (answer.empty()) {
     answer = fallback_answer_from_chunks(query, retrieved_chunks);
   }
+  query_trace.answer = answer;
+  query_trace.evidence = evidence_features;
+  last_query_trace_ = std::move(query_trace);
+  has_last_query_trace_ = true;
   return answer;
 }
 

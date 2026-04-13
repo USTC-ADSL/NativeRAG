@@ -94,6 +94,8 @@ void test_query_parses_semantic_hash_prefilter_flags() {
       snapshot_in_path.string(),
       "--state-snapshot-out",
       "/tmp/out.snapshot.tsv",
+      "--query-trace-out",
+      "/tmp/out.trace.json",
   };
 
   std::vector<char*> argv;
@@ -115,6 +117,7 @@ void test_query_parses_semantic_hash_prefilter_flags() {
   assert(config.adaptive_graph);
   assert(config.state_snapshot_in_path == snapshot_in_path.string());
   assert(config.state_snapshot_out_path == "/tmp/out.snapshot.tsv");
+  assert(config.query_trace_out_path == "/tmp/out.trace.json");
 
   std::filesystem::remove(llm_path);
   std::filesystem::remove(embedding_path);
