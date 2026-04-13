@@ -13,12 +13,14 @@ The immediate goal is not full dense promotion/demotion yet. The goal of this pa
 - SQLite now supports deterministic chunk-state snapshot export/import for experiment replay.
 - Newly indexed chunks are initialized to `warm`.
 - Query-time retrieved chunks are promoted to `hot`.
-- Query traces now emit an `[INDEX_STATE]` line showing how many retrieved chunks were newly promoted to `hot`.
+- Query-time stale `hot` chunks that are not retained by the current retrieval result are demoted back to `warm`.
+- Query traces now emit an `[INDEX_STATE]` line showing both query-time promotions and demotions.
 - Focused regressions validate:
   - chunk-state initialization
   - promotion and demotion history
   - persistence across reopen
   - query-time `warm -> hot` promotion inside `RAGPipeline`
+  - query-time `hot -> warm` demotion for non-retained chunks
   - snapshot export/import into a fresh SQLite state store
 
 ## Key implementation points
@@ -29,6 +31,7 @@ The immediate goal is not full dense promotion/demotion yet. The goal of this pa
   - `update_chunk_state(...)`
   - `get_chunk_state(...)`
   - `count_chunk_state_transitions(...)`
+  - `demote_non_retrieved_hot_chunks(...)`
   - `export_chunk_state_snapshot(...)`
   - `import_chunk_state_snapshot(...)`
 - `src/vector_db/SqliteVectorDB.cpp` now creates and maintains:
@@ -40,7 +43,12 @@ The immediate goal is not full dense promotion/demotion yet. The goal of this pa
   - transition rows sorted by chunk ID, timestamp, and event ID
   - importing a snapshot resets transition autoincrement tracking to the imported max event ID so replayed updates continue deterministically
 - `RAGPipeline::add_text_embeddings(...)` initializes newly ingested chunks as `warm`.
-- `RAGPipeline::answer_query(...)` promotes retrieved chunks to `hot` and emits an `[INDEX_STATE]` trace.
+- `SqliteVectorDB::demote_non_retrieved_hot_chunks(...)` scans canonical SQLite state for `hot` chunks that are not part of the current retained result set and records deterministic `hot -> warm` transitions.
+- `RAGPipeline::answer_query(...)` now:
+  - computes the retained retrieval IDs for the final result set
+  - demotes stale `hot` chunks to `warm` with reason `query_retrieval_miss`
+  - promotes current result chunks to `hot` with reason `query_retrieval_hit`
+  - emits an `[INDEX_STATE]` trace with both promotion and demotion counts
 - CLI now exposes:
   - `--state-snapshot-in`
   - `--state-snapshot-out`
@@ -58,10 +66,12 @@ The immediate goal is not full dense promotion/demotion yet. The goal of this pa
 1. During indexing, `RAGPipeline` persists vectors, texts, and semantic hashes as before.
 2. After successful SQLite persistence, the same chunk IDs are initialized to `warm`.
 3. During query-time retrieval, the selected graph executes as before.
-4. After final retrieval results are assembled, each retrieved chunk ID is promoted to `hot`.
-5. The pipeline emits an `[INDEX_STATE]` log with the number of newly promoted chunks.
-6. Retrieval and generation behavior otherwise remain unchanged.
-7. When a snapshot flag is provided:
+4. After final retrieval results are assembled, the pipeline computes the retained chunk-ID set for the current query.
+5. Any previously `hot` chunk that is not retained by the current result set is demoted to `warm`.
+6. Each retained retrieved chunk ID is then promoted to `hot`.
+7. The pipeline emits an `[INDEX_STATE]` log with both promotion and demotion counts for that query.
+8. Retrieval and generation behavior otherwise remain unchanged.
+9. When a snapshot flag is provided:
    - `--state-snapshot-in` restores chunk-state metadata before execution
    - `--state-snapshot-out` exports chunk-state metadata after execution
 
@@ -77,12 +87,17 @@ The immediate goal is not full dense promotion/demotion yet. The goal of this pa
 - Transition reason strings currently used by runtime:
   - `index_build`
   - `query_retrieval_hit`
+  - `query_retrieval_miss`
 
 ## Fallback behavior
 
 - If chunk-state initialization fails during indexing, the pipeline logs a warning and keeps the existing retrieval/indexing path alive.
-- If query-time chunk-state promotion fails, retrieval and generation still complete.
+- If query-time chunk-state demotion or promotion fails, retrieval and generation still complete.
 - If a chunk is already in the requested state, no duplicate transition record is written.
+- Current demotion policy is deterministic and narrow:
+  - only existing `hot` rows are considered
+  - only non-retained chunks are demoted
+  - demotion target is always `warm`
 
 ## Schema or storage changes
 
@@ -122,6 +137,7 @@ TRANSITION    <event_id>    <id>    <from_tier>    <to_tier>    <reason>    <cre
 
 - Adds `[INDEX_STATE]` query-time logs with:
   - `promoted_to_hot`
+  - `demoted_to_warm`
   - `retrieved_chunks`
 
 ## How to test / reproduce
@@ -132,17 +148,21 @@ TRANSITION    <event_id>    <id>    <from_tier>    <to_tier>    <reason>    <cre
    - `cmake --build build_progress_check --target test_command_line_args test_sqlite_vectordb_backend test_rag_semantic_hash_prefilter mobile_rag_cli -j4`
 3. Run focused regressions:
    - `ctest --test-dir build_progress_check -R 'CommandLineArgsTest|SqliteVectorDBBackendTest|RAGSemanticHashPrefilterTest' --output-on-failure`
-4. Export a snapshot during build or query:
+4. Verify the query-time promotion/demotion path with the focused pipeline test:
+   - `ctest --test-dir build_progress_check -R 'RAGSemanticHashPrefilterTest|SqliteVectorDBBackendTest' --output-on-failure`
+5. Export a snapshot during build or query:
    - `mobile_rag --query ... --state-snapshot-out /tmp/run.snapshot.tsv`
-5. Restore a snapshot before a later run:
+6. Restore a snapshot before a later run:
    - `mobile_rag --query ... --state-snapshot-in /tmp/run.snapshot.tsv`
-6. On device, rebuild runtime assets after the schema change and run a normal query:
-   - expect an `[INDEX_STATE]` line after retrieval result printing
+7. On device, rebuild runtime assets after the schema change and run two queries that hit different chunks:
+   - first query should log `promoted_to_hot=1 demoted_to_warm=0`
+   - second query should log `promoted_to_hot=1 demoted_to_warm=1`
+   - both runs should still emit the normal `[EVIDENCE]` and retrieval traces
 
 ## Known limitations / TODOs
 
 - This patch tracks state metadata only; it does not yet evict dense vectors or physically split hot/cold storage.
 - Promotion is query-hit based and heuristic.
-- Automatic demotion policy is not yet wired into runtime decisions.
+- Automatic demotion policy is now query-local and deterministic, but it is not yet budget-aware or tied to physical dense eviction.
 - Snapshot format is deterministic text, but it currently assumes runtime reason strings do not contain tabs or newlines.
 - Replay currently restores only chunk-state metadata, not dense/text corpus contents.

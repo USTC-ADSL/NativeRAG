@@ -83,8 +83,16 @@ int main() {
     assert(lexical_results[1].first == 30);
 
     assert(db.update_chunk_state(10, ChunkState::HOT, "retrieval_hit"));
+    assert(db.update_chunk_state(20, ChunkState::HOT, "retrieval_hit"));
     assert(db.get_chunk_state(10) == "hot");
     assert(db.count_chunk_state_transitions(10) == 2);
+    assert(db.get_chunk_state(20) == "hot");
+
+    assert(db.demote_non_retrieved_hot_chunks({20}, ChunkState::WARM, "query_retrieval_miss") ==
+           1);
+    assert(db.get_chunk_state(10) == "warm");
+    assert(db.get_chunk_state(20) == "hot");
+    assert(db.count_chunk_state_transitions(10) == 3);
   }
 
   {
@@ -98,11 +106,12 @@ int main() {
     const auto reopened_lexical = reopened.search_text_lexical("beta", 1);
     assert(reopened_lexical.size() == 1);
     assert(reopened_lexical[0].first == 20);
-    assert(reopened.get_chunk_state(10) == "hot");
-    assert(reopened.count_chunk_state_transitions(10) == 2);
+    assert(reopened.get_chunk_state(10) == "warm");
+    assert(reopened.get_chunk_state(20) == "hot");
+    assert(reopened.count_chunk_state_transitions(10) == 3);
     assert(reopened.update_chunk_state(10, ChunkState::COLD, "manual_demotion"));
     assert(reopened.get_chunk_state(10) == "cold");
-    assert(reopened.count_chunk_state_transitions(10) == 3);
+    assert(reopened.count_chunk_state_transitions(10) == 4);
     assert(reopened.export_chunk_state_snapshot(snapshot));
   }
 
@@ -131,9 +140,9 @@ int main() {
     SqliteVectorDB restored(restored_db_path);
     assert(restored.import_chunk_state_snapshot(snapshot));
     assert(restored.get_chunk_state(10) == "cold");
-    assert(restored.get_chunk_state(20) == "warm");
-    assert(restored.count_chunk_state_transitions(10) == 3);
-    assert(restored.count_chunk_state_transitions(20) == 1);
+    assert(restored.get_chunk_state(20) == "hot");
+    assert(restored.count_chunk_state_transitions(10) == 4);
+    assert(restored.count_chunk_state_transitions(20) == 2);
     std::filesystem::remove(restored_db_path);
   }
 

@@ -264,6 +264,50 @@ void test_adaptive_graph_logs_controller_selection() {
   std::filesystem::remove(db_path);
 }
 
+void test_query_promotes_new_hit_and_demotes_previous_hot_chunk() {
+  const std::string db_path = make_temp_db_path("state-demotion");
+  std::filesystem::remove(db_path);
+
+  auto sqlite_db = std::make_shared<SqliteVectorDB>(db_path);
+  auto embedder = std::make_shared<FakeEmbeddingModel>();
+  auto index = std::make_shared<FakeVectorIndex>();
+  auto llm = std::make_shared<FakeLLM>();
+
+  TestableRAGPipeline pipeline(nullptr, embedder, index, llm, sqlite_db, 1, 128, 16);
+
+  const std::vector<std::string> texts = {
+      "SQLite stores metadata and traces for this project.",
+      "Faiss accelerates dense search for this project.",
+  };
+  const std::vector<std::vector<float>> vectors = {
+      {1.0f, 0.0f},
+      {0.0f, 1.0f},
+  };
+  assert(pipeline.ingest(texts, vectors, "state-demotion-test"));
+  assert(sqlite_db->get_chunk_state(0) == "warm");
+  assert(sqlite_db->get_chunk_state(1) == "warm");
+
+  const std::string first_query = "sqlite metadata traces";
+  embedder->query_embeddings[first_query] = {1.0f, 0.0f};
+  index->search_results = {{0, 0.91f}};
+  const auto first_run = run_query_and_capture_stdout(pipeline, first_query);
+  assert(first_run.stdout_text.find("[INDEX_STATE] promoted_to_hot=1 demoted_to_warm=0") !=
+         std::string::npos);
+  assert(sqlite_db->get_chunk_state(0) == "hot");
+  assert(sqlite_db->get_chunk_state(1) == "warm");
+
+  const std::string second_query = "faiss dense search";
+  embedder->query_embeddings[second_query] = {0.0f, 1.0f};
+  index->search_results = {{1, 0.88f}};
+  const auto second_run = run_query_and_capture_stdout(pipeline, second_query);
+  assert(second_run.stdout_text.find("[INDEX_STATE] promoted_to_hot=1 demoted_to_warm=1") !=
+         std::string::npos);
+  assert(sqlite_db->get_chunk_state(0) == "warm");
+  assert(sqlite_db->get_chunk_state(1) == "hot");
+
+  std::filesystem::remove(db_path);
+}
+
 }  // namespace
 
 int main() {
@@ -271,5 +315,6 @@ int main() {
   test_prefilter_falls_back_to_dense_search_when_shortlist_is_empty();
   test_lexical_and_hash_shortlists_are_merged_before_dense_rerank();
   test_adaptive_graph_logs_controller_selection();
+  test_query_promotes_new_hit_and_demotes_previous_hot_chunk();
   return 0;
 }

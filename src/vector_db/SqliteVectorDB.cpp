@@ -1137,6 +1137,41 @@ int SqliteVectorDB::count_chunk_state_transitions(int64_t id) const {
   return count;
 }
 
+int SqliteVectorDB::demote_non_retrieved_hot_chunks(
+    const std::vector<int64_t>& retained_ids,
+    ChunkState target_state,
+    const std::string& reason) {
+  if (!db_) return 0;
+
+  const std::unordered_set<int64_t> retained(retained_ids.begin(), retained_ids.end());
+  const char* sql = "SELECT id FROM chunk_states WHERE tier = 'hot' ORDER BY id;";
+  sqlite3_stmt* stmt = nullptr;
+  int rc = sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr);
+  if (rc != SQLITE_OK) {
+    return 0;
+  }
+
+  std::vector<int64_t> ids_to_demote;
+  while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+    const auto id = static_cast<int64_t>(sqlite3_column_int64(stmt, 0));
+    if (retained.count(id) == 0) {
+      ids_to_demote.push_back(id);
+    }
+  }
+  sqlite3_finalize(stmt);
+  if (rc != SQLITE_DONE) {
+    return 0;
+  }
+
+  int demoted_count = 0;
+  for (const auto id : ids_to_demote) {
+    if (update_chunk_state(id, target_state, reason)) {
+      ++demoted_count;
+    }
+  }
+  return demoted_count;
+}
+
 bool SqliteVectorDB::export_chunk_state_snapshot(const std::string& snapshot_path) const {
   if (!db_ || snapshot_path.empty()) return false;
 

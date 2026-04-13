@@ -528,6 +528,14 @@ std::string RAGPipeline::answer_query(const std::string& query) {
   }
 
   if (sqlite_db_) {
+    std::vector<int64_t> retrieved_ids;
+    retrieved_ids.reserve(execution.results.size());
+    for (const auto& [id, /*score*/ _] : execution.results) {
+      retrieved_ids.push_back(id);
+    }
+
+    const int demoted_to_warm = sqlite_db_->demote_non_retrieved_hot_chunks(
+        retrieved_ids, ChunkState::WARM, "query_retrieval_miss");
     int promoted_to_hot = 0;
     for (const auto& [id, /*score*/ _] : execution.results) {
       const auto previous_state = sqlite_db_->get_chunk_state(id);
@@ -537,6 +545,7 @@ std::string RAGPipeline::answer_query(const std::string& query) {
       }
     }
     std::cout << "[INDEX_STATE] promoted_to_hot=" << promoted_to_hot
+              << " demoted_to_warm=" << demoted_to_warm
               << " retrieved_chunks=" << execution.results.size() << '\n';
   }
 

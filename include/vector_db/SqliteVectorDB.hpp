@@ -62,6 +62,9 @@ class SqliteVectorDB : public IVectorDB {
                           const std::string& reason);
   std::string get_chunk_state(int64_t id) const;
   int count_chunk_state_transitions(int64_t id) const;
+  int demote_non_retrieved_hot_chunks(const std::vector<int64_t>& retained_ids,
+                                      ChunkState target_state,
+                                      const std::string& reason);
   bool export_chunk_state_snapshot(const std::string& snapshot_path) const;
   bool import_chunk_state_snapshot(const std::string& snapshot_path);
 
