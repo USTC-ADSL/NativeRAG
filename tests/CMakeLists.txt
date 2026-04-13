@@ -414,6 +414,7 @@ endif()
 
 # Enable testing
 enable_testing()
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
 add_test(NAME CommandLineArgsTest COMMAND $<TARGET_FILE:test_command_line_args>)
 add_test(NAME QueryFileLoaderTest COMMAND $<TARGET_FILE:test_query_file_loader>)
 add_test(NAME BatchQueryReportTest COMMAND $<TARGET_FILE:test_batch_query_report>)
@@ -429,6 +430,8 @@ add_test(NAME EmbeddingTest COMMAND $<TARGET_FILE:test_embedding>)
 add_test(NAME LLMTest COMMAND $<TARGET_FILE:test_llm>)
 add_test(NAME VectorDBIntegratedTest COMMAND $<TARGET_FILE:test_vectordb_integrated>)
 add_test(NAME RAGIntegrationTest COMMAND $<TARGET_FILE:test_rag_integration>)
+add_test(NAME BenchmarkRunnerTest
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_benchmark_runner.py)
 
 # Set test properties
 set_tests_properties(
@@ -447,6 +450,7 @@ set_tests_properties(
     VectorDBTest
     VectorDBIntegratedTest
     RAGIntegrationTest
+    BenchmarkRunnerTest
     PROPERTIES
     TIMEOUT 120
     LABELS "integration"
@@ -467,6 +471,7 @@ message(STATUS "  - test_batch_query_report (aggregate batch report export)")
 message(STATUS "  - test_query_file_loader (batch query file parsing)")
 message(STATUS "  - test_prompt_utils (generation output cleanup)")
 message(STATUS "  - test_evidence_features (evidence feature extraction)")
+message(STATUS "  - test_benchmark_runner (Phase 7 benchmark runner automation)")
 message(STATUS "  - test_semantic_hashing (Group C - semantic hash)")
 message(STATUS "  - test_rag_semantic_hash_prefilter (query-time semantic hash prefilter)")
 message(STATUS "  - test_sqlite_vectordb_backend (SQLite lexical/vector backend)")
