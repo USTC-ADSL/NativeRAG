@@ -131,6 +131,15 @@ target_include_directories(test_query_file_loader PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
 )
 
+add_executable(test_batch_query_report
+    ${CMAKE_CURRENT_SOURCE_DIR}/test_batch_query_report.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/cli/BatchQueryReport.cpp
+)
+
+target_include_directories(test_batch_query_report PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+)
+
 add_executable(test_llama_logging
     ${CMAKE_CURRENT_SOURCE_DIR}/test_llama_logging.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/llm/LlamaCppLogging.cpp
@@ -407,6 +416,7 @@ endif()
 enable_testing()
 add_test(NAME CommandLineArgsTest COMMAND $<TARGET_FILE:test_command_line_args>)
 add_test(NAME QueryFileLoaderTest COMMAND $<TARGET_FILE:test_query_file_loader>)
+add_test(NAME BatchQueryReportTest COMMAND $<TARGET_FILE:test_batch_query_report>)
 add_test(NAME LlamaLoggingTest COMMAND $<TARGET_FILE:test_llama_logging>)
 add_test(NAME PromptUtilsTest COMMAND $<TARGET_FILE:test_prompt_utils>)
 add_test(NAME EvidenceFeaturesTest COMMAND $<TARGET_FILE:test_evidence_features>)
@@ -424,6 +434,7 @@ add_test(NAME RAGIntegrationTest COMMAND $<TARGET_FILE:test_rag_integration>)
 set_tests_properties(
     CommandLineArgsTest
     QueryFileLoaderTest
+    BatchQueryReportTest
     LlamaLoggingTest
     PromptUtilsTest
     EvidenceFeaturesTest
@@ -452,6 +463,7 @@ if(USE_PREBUILT)
 endif()
 
 message(STATUS "Tests configured:")
+message(STATUS "  - test_batch_query_report (aggregate batch report export)")
 message(STATUS "  - test_query_file_loader (batch query file parsing)")
 message(STATUS "  - test_prompt_utils (generation output cleanup)")
 message(STATUS "  - test_evidence_features (evidence feature extraction)")

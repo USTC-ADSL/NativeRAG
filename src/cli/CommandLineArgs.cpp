@@ -101,6 +101,8 @@ bool CommandLineArgs::parse_options() {
       config_.query_trace_jsonl_out_path = argv_[++i];
     } else if (arg == "--query-summary-csv-out" && i + 1 < argc_) {
       config_.query_summary_csv_out_path = argv_[++i];
+    } else if (arg == "--query-batch-report-out" && i + 1 < argc_) {
+      config_.query_batch_report_out_path = argv_[++i];
     } else if (arg == "--top-k" && i + 1 < argc_) {
       config_.top_k = std::stoi(argv_[++i]);
     } else if (arg == "--threads" && i + 1 < argc_) {
@@ -314,6 +316,12 @@ bool CommandLineArgs::validate_config() {
     return false;
   }
 
+  if (!config_.query_batch_report_out_path.empty() &&
+      config_.command != Command::QUERY) {
+    std::cerr << "Error: --query-batch-report-out is only supported for --query\n";
+    return false;
+  }
+
   if (config_.top_k <= 0) {
     std::cerr << "Error: --top-k must be positive\n";
     return false;
@@ -423,6 +431,8 @@ void CommandLineArgs::print_help() const {
             << "                               Append the final query trace as one JSONL row (query mode only)\n"
             << "  --query-summary-csv-out <path>\n"
             << "                               Append a flat query summary row to CSV (query mode only)\n"
+            << "  --query-batch-report-out <path>\n"
+            << "                               Export one aggregate batch report as JSON (query mode only)\n"
             << "  --top-k <num>                Number of documents to retrieve (default: 5)\n"
             << "  --threads <num>              Number of threads (default: 4)\n"
             << "  --max-new-tokens <num>       Maximum generated tokens (default: 256)\n"
@@ -457,7 +467,8 @@ void CommandLineArgs::print_help() const {
             << "             --llm-model ./models/llm/model.gguf \\\n"
             << "             --embedding-model ./models/emb/config.json \\\n"
             << "             --query-trace-jsonl-out /tmp/query-trace.jsonl \\\n"
-            << "             --query-summary-csv-out /tmp/query-summary.csv\n\n"
+            << "             --query-summary-csv-out /tmp/query-summary.csv \\\n"
+            << "             --query-batch-report-out /tmp/query-batch-report.json\n\n"
             << "  # Stage 2: Interactive mode (needs both embedding and LLM models)\n"
             << "  mobile_rag --interactive --verbose --top-k 10 \\\n"
             << "             --llm-model ./models/llm/model.gguf \\\n"

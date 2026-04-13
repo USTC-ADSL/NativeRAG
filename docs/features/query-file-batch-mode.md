@@ -20,6 +20,8 @@ This patch adds a file-driven batch mode for `--query` so one process can answer
 - Batch query mode reuses the existing append-friendly exports:
   - `--query-trace-jsonl-out`
   - `--query-summary-csv-out`
+- Batch query mode can also emit one invocation-level aggregate report through:
+  - `--query-batch-report-out`
 - Batch query mode rejects `--query-trace-out` because a single JSON file is ambiguous when multiple queries run in one invocation.
 
 ## Key implementation points
@@ -79,6 +81,9 @@ This patch adds a file-driven batch mode for `--query` so one process can answer
 - `--query-summary-csv-out <path>`
   - supported for both single-query and batch-query mode
   - appends one summary row per query
+- `--query-batch-report-out <path>`
+  - supported for both single-query and batch-query mode
+  - writes one aggregate JSON report after the invocation finishes
 
 This patch does not change retrieval thresholds, controller heuristics, or graph-selection defaults.
 
@@ -113,11 +118,12 @@ This patch reuses existing query trace and summary metrics while making it easie
    - with one query per line
    - blank lines and `#` comment lines allowed
 5. Run batch query mode:
-   - `mobile_rag --query --query-file queries.txt --llm-model <gguf> --embedding-model <emb-config> --query-trace-jsonl-out /tmp/query-trace.jsonl --query-summary-csv-out /tmp/query-summary.csv ...`
+   - `mobile_rag --query --query-file queries.txt --llm-model <gguf> --embedding-model <emb-config> --query-trace-jsonl-out /tmp/query-trace.jsonl --query-summary-csv-out /tmp/query-summary.csv --query-batch-report-out /tmp/query-batch-report.json ...`
 6. Confirm:
    - one answer is emitted per runnable query
    - JSONL contains one JSON object per query
    - CSV contains one appended row per query
+   - batch report contains one aggregate JSON summary for the invocation
    - `--query-trace-out` is rejected when `--query-file` is present
 
 ## Known limitations / TODOs

@@ -5,6 +5,7 @@
 #include <iomanip>
 
 #include "RAGPipelineWithDataset.hpp"
+#include "cli/BatchQueryReport.hpp"
 #include "cli/CommandLineArgs.hpp"
 #include "cli/QueryFileLoader.hpp"
 
@@ -89,6 +90,10 @@ int main(int argc, char** argv) {
               << "  Query Summary CSV Out: "
               << (config.query_summary_csv_out_path.empty() ? "(none)"
                                                             : config.query_summary_csv_out_path)
+              << '\n'
+              << "  Query Batch Report Out: "
+              << (config.query_batch_report_out_path.empty() ? "(none)"
+                                                            : config.query_batch_report_out_path)
               << '\n'
               << "  Query File: "
               << (config.query_file_path.empty() ? "(none)"
@@ -252,6 +257,7 @@ int main(int argc, char** argv) {
     RAGPipelineWithDataset pipeline(nullptr, embedder, index, llm, sqlite_db,
                                     config.top_k, config.chunk_size,
                                     config.chunk_overlap);
+    BatchQueryReport batch_report;
     GraphSelector::Config graph_selector_config;
     graph_selector_config.enabled = config.adaptive_graph;
     pipeline.set_graph_selector_config(graph_selector_config);
@@ -345,10 +351,21 @@ int main(int argc, char** argv) {
 
       std::string answer = pipeline.answer_query(query);
       std::cout << answer << '\n';
+      batch_report.record(pipeline.last_query_trace());
 
       if (!export_query_artifacts()) {
         return 1;
       }
+    }
+
+    if (!config.query_batch_report_out_path.empty()) {
+      if (!batch_report.export_json(config.query_batch_report_out_path)) {
+        std::cerr << "[ERROR] Failed to export query batch report: "
+                  << config.query_batch_report_out_path << '\n';
+        return 1;
+      }
+      std::cout << "✓ Query batch report exported to: "
+                << config.query_batch_report_out_path << '\n';
     }
 
     if (!config.state_snapshot_out_path.empty()) {

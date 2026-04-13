@@ -53,6 +53,7 @@ class CommandLineArgs {
     std::string query_trace_out_path;
     std::string query_trace_jsonl_out_path;
     std::string query_summary_csv_out_path;
+    std::string query_batch_report_out_path;
 
     // Performance
     int num_threads = 4;

@@ -101,6 +101,8 @@ void test_query_file_parses_batch_exports() {
       "/tmp/out.trace.jsonl",
       "--query-summary-csv-out",
       "/tmp/out.summary.csv",
+      "--query-batch-report-out",
+      "/tmp/out.batch.json",
   };
 
   std::vector<char*> argv;
@@ -126,6 +128,7 @@ void test_query_file_parses_batch_exports() {
   assert(config.query_trace_out_path.empty());
   assert(config.query_trace_jsonl_out_path == "/tmp/out.trace.jsonl");
   assert(config.query_summary_csv_out_path == "/tmp/out.summary.csv");
+  assert(config.query_batch_report_out_path == "/tmp/out.batch.json");
 
   std::filesystem::remove_all(scratch_dir);
 }
