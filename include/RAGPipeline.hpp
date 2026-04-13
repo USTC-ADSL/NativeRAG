@@ -44,6 +44,12 @@ class RAGPipeline {
     std::string final_graph = "dense_only";
     std::string initial_reason = "adaptive_disabled";
     std::string final_reason = "adaptive_disabled";
+    int top_k = 0;
+    bool lexical_prefilter_enabled = false;
+    int lexical_candidate_limit = 0;
+    bool semantic_hash_prefilter_enabled = false;
+    int semantic_hash_candidate_limit = 0;
+    int semantic_hash_max_distance = -1;
     bool escalated = false;
     std::string escalation_from;
     std::string escalation_to;

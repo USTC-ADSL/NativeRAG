@@ -218,6 +218,16 @@ bool RAGPipeline::export_last_query_trace(const std::string& output_path) const 
       << "  \"final_graph\":\"" << json_escape(last_query_trace_.final_graph) << "\",\n"
       << "  \"initial_reason\":\"" << json_escape(last_query_trace_.initial_reason) << "\",\n"
       << "  \"final_reason\":\"" << json_escape(last_query_trace_.final_reason) << "\",\n"
+      << "  \"top_k\":" << last_query_trace_.top_k << ",\n"
+      << "  \"lexical_prefilter_enabled\":"
+      << (last_query_trace_.lexical_prefilter_enabled ? "true" : "false") << ",\n"
+      << "  \"lexical_candidate_limit\":" << last_query_trace_.lexical_candidate_limit << ",\n"
+      << "  \"semantic_hash_prefilter_enabled\":"
+      << (last_query_trace_.semantic_hash_prefilter_enabled ? "true" : "false") << ",\n"
+      << "  \"semantic_hash_candidate_limit\":"
+      << last_query_trace_.semantic_hash_candidate_limit << ",\n"
+      << "  \"semantic_hash_max_distance\":"
+      << last_query_trace_.semantic_hash_max_distance << ",\n"
       << "  \"escalated\":"
       << (last_query_trace_.escalated ? "true" : "false") << ",\n"
       << "  \"escalation_from\":\"" << json_escape(last_query_trace_.escalation_from) << "\",\n"
@@ -491,6 +501,12 @@ std::string RAGPipeline::answer_query(const std::string& query) {
   query_trace.query = query;
   query_trace.adaptive_graph_enabled = graph_selector_.config().enabled;
   query_trace.budget_class = budget_class_name(budget_class);
+  query_trace.top_k = top_k_;
+  query_trace.lexical_prefilter_enabled = lexical_prefilter_.enabled;
+  query_trace.lexical_candidate_limit = lexical_prefilter_.candidate_limit;
+  query_trace.semantic_hash_prefilter_enabled = semantic_hash_prefilter_.enabled;
+  query_trace.semantic_hash_candidate_limit = semantic_hash_prefilter_.candidate_limit;
+  query_trace.semantic_hash_max_distance = semantic_hash_prefilter_.max_hamming_distance;
 
   RetrievalGraph active_graph =
       graph_from_prefilter_flags(lexical_prefilter_.enabled, semantic_hash_prefilter_.enabled);

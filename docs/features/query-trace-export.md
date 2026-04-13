@@ -14,6 +14,7 @@ This patch adds an explicit per-query JSON export path so experiments can persis
   - `last_query_trace()`
   - `export_last_query_trace(...)`
 - The exported trace captures:
+  - query-time retrieval config snapshot
   - controller decision fields
   - retrieval candidate counts and fallback reason
   - evidence features
@@ -31,6 +32,10 @@ This patch adds an explicit per-query JSON export path so experiments can persis
   - `export_last_query_trace(...)`
 - `src/RAGPipeline.cpp` now:
   - clears the previous trace at the start of each query
+  - records the active retrieval knobs used for the query:
+    - `top_k`
+    - lexical prefilter enablement and shortlist size
+    - semantic-hash prefilter enablement, shortlist size, and max distance
   - records initial/final graph decisions and budget class
   - records escalation metadata when the controller upgrades the graph
   - records retrieval candidate counts, fallback reason, and final ranked results
@@ -90,6 +95,7 @@ No new stdout log family is added.
 
 This patch adds a structured JSON artifact that mirrors and aggregates existing query-time logs:
 
+- retrieval knob snapshot
 - controller choice
 - retrieval candidate counts
 - evidence features

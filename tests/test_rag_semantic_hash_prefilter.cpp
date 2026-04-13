@@ -270,6 +270,12 @@ void test_adaptive_graph_logs_controller_selection() {
   assert(trace.budget_class == "tight");
   assert(trace.initial_reason == "term_rich_query");
   assert(trace.final_reason == "evidence_sufficient");
+  assert(trace.top_k == 1);
+  assert(trace.lexical_prefilter_enabled);
+  assert(trace.lexical_candidate_limit == 1);
+  assert(trace.semantic_hash_prefilter_enabled);
+  assert(trace.semantic_hash_candidate_limit == 1);
+  assert(trace.semantic_hash_max_distance == 0);
   assert(trace.lexical_candidate_count == 1);
   assert(trace.hash_candidate_count == 0);
   assert(trace.dense_result_count == 1);
@@ -293,6 +299,9 @@ void test_adaptive_graph_logs_controller_selection() {
   assert(trace_json.find("\"initial_graph\":\"lexical_prefilter\"") != std::string::npos);
   assert(trace_json.find("\"final_graph\":\"lexical_prefilter\"") != std::string::npos);
   assert(trace_json.find("\"budget_class\":\"tight\"") != std::string::npos);
+  assert(trace_json.find("\"top_k\":1") != std::string::npos);
+  assert(trace_json.find("\"lexical_prefilter_enabled\":true") != std::string::npos);
+  assert(trace_json.find("\"semantic_hash_candidate_limit\":1") != std::string::npos);
   assert(trace_json.find("\"promoted_to_hot\":1") != std::string::npos);
   assert(trace_json.find("\"hot\":1") != std::string::npos);
   assert(trace_json.find("\"transition_count\":3") != std::string::npos);
