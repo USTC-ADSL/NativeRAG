@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+#include "vector_Index/FaissIndex.hpp"
+#include "vector_db/IngestUtils.hpp"
 #include "vector_db/SqliteVectorDB.hpp"
 
 using namespace mobile_rag;
@@ -27,6 +29,14 @@ std::string replay_snapshot_path() {
   return "/tmp/native_rag_sqlite_vectordb_backend.replay.snapshot.tsv";
 }
 
+std::string filtered_index_path() {
+  return "/tmp/native_rag_sqlite_vectordb_backend.filtered.faiss";
+}
+
+std::string empty_filtered_index_path() {
+  return "/tmp/native_rag_sqlite_vectordb_backend.filtered.empty.faiss";
+}
+
 void assert_top_result(const std::vector<std::pair<int64_t, float>>& results,
                        int64_t expected_id) {
   assert(!results.empty());
@@ -40,10 +50,14 @@ int main() {
   const std::string snapshot = snapshot_path();
   const std::string warm_snapshot = warm_snapshot_path();
   const std::string replay_snapshot = replay_snapshot_path();
+  const std::string filtered_index = filtered_index_path();
+  const std::string empty_filtered_index = empty_filtered_index_path();
   std::filesystem::remove(db_path);
   std::filesystem::remove(snapshot);
   std::filesystem::remove(warm_snapshot);
   std::filesystem::remove(replay_snapshot);
+  std::filesystem::remove(filtered_index);
+  std::filesystem::remove(empty_filtered_index);
 
   {
     SqliteVectorDB db(db_path);
@@ -122,6 +136,16 @@ int main() {
     assert(reopened.update_chunk_state(10, ChunkState::COLD, "manual_demotion"));
     assert(reopened.get_chunk_state(10) == "cold");
     assert(reopened.count_chunk_state_transitions(10) == 4);
+    assert(reopened.get_vector_dimension() == 3);
+    const auto warm_hot_vectors =
+        reopened.load_vectors_by_chunk_states({ChunkState::WARM, ChunkState::HOT});
+    assert(warm_hot_vectors.size() == 2);
+    assert(warm_hot_vectors[0].first == 20);
+    assert(warm_hot_vectors[0].second.size() == 3);
+    assert(warm_hot_vectors[0].second[1] == 1.0f);
+    assert(warm_hot_vectors[1].first == 30);
+    assert(warm_hot_vectors[1].second.size() == 3);
+    assert(warm_hot_vectors[1].second[0] == 0.8f);
     const auto reopened_summary = reopened.get_chunk_state_summary();
     assert(reopened_summary.cold_count == 1);
     assert(reopened_summary.warm_count == 1);
@@ -179,10 +203,37 @@ int main() {
            std::string::npos);
   }
 
+  {
+    SqliteVectorDB filtered_source(db_path);
+    assert(filtered_source.import_chunk_state_snapshot(snapshot));
+    assert(rebuild_faiss_index_from_sqlite_by_chunk_states(
+        db_path, filtered_index, {ChunkState::WARM, ChunkState::HOT}));
+    FaissIndex filtered_index_reader;
+    assert(filtered_index_reader.load_index(filtered_index));
+    const auto filtered_results = filtered_index_reader.search({1.0f, 0.0f, 0.0f}, 2);
+    assert(filtered_results.size() == 2);
+    assert(filtered_results[0].first == 30);
+    assert(filtered_results[1].first == 20);
+  }
+
+  {
+    SqliteVectorDB all_cold(db_path);
+    assert(all_cold.update_chunk_state(20, ChunkState::COLD, "manual_cold"));
+    assert(all_cold.update_chunk_state(30, ChunkState::COLD, "manual_cold"));
+    assert(rebuild_faiss_index_from_sqlite_by_chunk_states(
+        db_path, empty_filtered_index, {ChunkState::WARM, ChunkState::HOT}));
+    FaissIndex empty_index_reader;
+    assert(empty_index_reader.load_index(empty_filtered_index));
+    const auto empty_results = empty_index_reader.search({1.0f, 0.0f, 0.0f}, 1);
+    assert(empty_results.empty());
+  }
+
   std::filesystem::remove(db_path);
   std::filesystem::remove(snapshot);
   std::filesystem::remove(warm_snapshot);
   std::filesystem::remove(replay_snapshot);
+  std::filesystem::remove(filtered_index);
+  std::filesystem::remove(empty_filtered_index);
   std::cout << "SqliteVectorDB backend test passed\n";
   return 0;
 }

@@ -214,6 +214,51 @@ void test_query_rejects_inline_query_and_query_file() {
   std::filesystem::remove_all(scratch_dir);
 }
 
+void test_rebuild_state_filtered_index_parses_without_models() {
+  const std::filesystem::path scratch_dir = "/tmp/native_rag_cli_rebuild_state_index";
+  const auto sqlite_db_path = scratch_dir / "rag.sqlite3";
+  const auto snapshot_in_path = scratch_dir / "state.snapshot.tsv";
+
+  std::filesystem::create_directories(scratch_dir);
+  std::ofstream(sqlite_db_path.string()).put('\n');
+  std::ofstream(snapshot_in_path.string()) << "STATE_SNAPSHOT_V1\n";
+
+  std::vector<std::string> args = {
+      "mobile_rag",
+      "--rebuild-state-filtered-index",
+      "--sqlite-db",
+      sqlite_db_path.string(),
+      "--index-path",
+      "/tmp/rebuilt-state.faiss",
+      "--state-snapshot-in",
+      snapshot_in_path.string(),
+      "--faiss-type",
+      "Flat",
+      "--verbose",
+  };
+
+  std::vector<char*> argv;
+  argv.reserve(args.size());
+  for (const auto& arg : args) {
+    argv.push_back(const_cast<char*>(arg.c_str()));
+  }
+
+  mobile_rag::CommandLineArgs parser(static_cast<int>(argv.size()), argv.data());
+  const bool parsed = parser.parse();
+  assert(parsed);
+
+  const auto& config = parser.get_config();
+  assert(config.command == mobile_rag::CommandLineArgs::Command::REBUILD_STATE_FILTERED_INDEX);
+  assert(config.sqlite_db_path == sqlite_db_path.string());
+  assert(config.index_path == "/tmp/rebuilt-state.faiss");
+  assert(config.state_snapshot_in_path == snapshot_in_path.string());
+  assert(config.faiss_index_type == "Flat");
+  assert(config.llm_model_path.empty());
+  assert(config.embedding_model_path.empty());
+
+  std::filesystem::remove_all(scratch_dir);
+}
+
 }  // namespace
 
 int main() {
@@ -221,6 +266,7 @@ int main() {
   test_query_file_parses_batch_exports();
   test_query_file_rejects_single_json_trace_export();
   test_query_rejects_inline_query_and_query_file();
+  test_rebuild_state_filtered_index_parses_without_models();
   std::cout << "CommandLineArgs regression tests passed\n";
   return 0;
 }

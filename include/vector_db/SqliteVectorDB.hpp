@@ -61,6 +61,9 @@ class SqliteVectorDB : public IVectorDB {
       const std::vector<float>& query_vector,
       const std::vector<int64_t>& candidate_ids,
       int k) const;
+  int get_vector_dimension() const;
+  std::vector<std::pair<int64_t, std::vector<float>>> load_vectors_by_chunk_states(
+      const std::vector<ChunkState>& allowed_states) const;
   std::vector<int64_t> filter_ids_by_chunk_states(
       const std::vector<int64_t>& candidate_ids,
       const std::vector<ChunkState>& allowed_states) const;

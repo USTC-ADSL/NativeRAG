@@ -28,6 +28,8 @@ class FaissIndex : public IVectorIndex {
   std::vector<std::pair<int64_t, float>> search(
       const std::vector<float>& query_vector, int k) override;
 
+  bool initialize_empty(int dimension);
+
   bool save_index(const std::string& index_path) override;
 
   bool load_index(const std::string& index_path) override;
@@ -42,6 +44,5 @@ class FaissIndex : public IVectorIndex {
 };
 
 }  // namespace mobile_rag
-
 
 

@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "faiss/MetricType.h"
+#include "vector_db/SqliteVectorDB.hpp"
 
 namespace mobile_rag {
 
@@ -60,7 +61,13 @@ bool build_faiss_index_from_vectors_file(
     const std::string& factory_desc,
     faiss::MetricType metric);
 
-}  // namespace mobile_rag
+bool rebuild_faiss_index_from_sqlite_by_chunk_states(
+    const std::string& sqlite_db_path,
+    const std::string& faiss_index_path,
+    const std::vector<ChunkState>& allowed_states,
+    const std::string& factory_desc = "Flat",
+    faiss::MetricType metric = faiss::METRIC_INNER_PRODUCT);
 
+}  // namespace mobile_rag
 
 

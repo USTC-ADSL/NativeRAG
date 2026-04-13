@@ -48,6 +48,7 @@ bool CommandLineArgs::parse() {
 CommandLineArgs::Command CommandLineArgs::parse_command(const std::string& cmd) {
   if (cmd == "--help" || cmd == "-h") return Command::HELP;
   if (cmd == "--build") return Command::BUILD;
+  if (cmd == "--rebuild-state-filtered-index") return Command::REBUILD_STATE_FILTERED_INDEX;
   if (cmd == "--query") return Command::QUERY;
   if (cmd == "--interactive" || cmd == "-i") return Command::INTERACTIVE;
   return Command::UNKNOWN;
@@ -219,6 +220,19 @@ bool CommandLineArgs::validate_config() {
                 << config_.embedding_model_path << '\n';
       return false;
     }
+  } else if (config_.command == Command::REBUILD_STATE_FILTERED_INDEX) {
+    if (config_.sqlite_db_path.empty()) {
+      std::cerr << "Error: --sqlite-db is required for --rebuild-state-filtered-index\n";
+      return false;
+    }
+    if (!std::filesystem::exists(config_.sqlite_db_path)) {
+      std::cerr << "Error: SQLite DB path not found: " << config_.sqlite_db_path << '\n';
+      return false;
+    }
+    if (config_.index_path.empty()) {
+      std::cerr << "Error: --index-path is required for --rebuild-state-filtered-index\n";
+      return false;
+    }
   } else if (config_.command == Command::QUERY) {
     // QUERY phase: needs both embedding model and LLM
     const bool has_inline_query = !config_.query.empty();
@@ -371,6 +385,8 @@ void CommandLineArgs::print_usage() const {
   std::cout << "Usage: mobile_rag <command> [options] [arguments]\n"
             << "Commands:\n"
             << "  --build <path>        Build index from txt file/dir or dataset file\n"
+            << "  --rebuild-state-filtered-index\n"
+            << "                       Rebuild a warm/hot-only Faiss index from SQLite vectors\n"
             << "  --query <question>    Query the RAG system\n"
             << "  --query --query-file <path>\n"
             << "                       Run query mode for each line in a file\n"
@@ -406,6 +422,8 @@ void CommandLineArgs::print_help() const {
             << "  Embedding backend: MNN (embedding model should point to its config)\n\n"
             << "COMMANDS:\n"
             << "  --build <file>        Build vector index from document file (Offline Phase)\n"
+            << "  --rebuild-state-filtered-index\n"
+            << "                        Rebuild a warm/hot-only Faiss index from SQLite vectors\n"
             << "  --query <question>    Query the RAG system with a question (Online Phase)\n"
             << "  --query --query-file <path>\n"
             << "                        Run query mode once per non-empty line in a file\n"
@@ -416,6 +434,10 @@ void CommandLineArgs::print_help() const {
             << "    --embedding-model <path>     Path to embedding model config (REQUIRED)\n"
             << "    --text-path <path>           Text file/directory (for txt mode)\n"
             << "    --dataset-path <path>        Dataset json path (for dataset mode)\n\n"
+            << "  REBUILD STATE-FILTERED INDEX:\n"
+            << "    --sqlite-db <path>           Existing SQLite vector store (REQUIRED)\n"
+            << "    --index-path <path>          Output Faiss index path (REQUIRED)\n"
+            << "    --state-snapshot-in <path>   Optional snapshot to import before rebuilding\n\n"
             << "  QUERY/INTERACTIVE (Online Phase):\n"
             << "    --llm-model <path>           Path to LLM model config (REQUIRED)\n"
             << "    --embedding-model <path>     Path to embedding model config (REQUIRED)\n\n"

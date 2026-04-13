@@ -555,6 +555,78 @@ std::vector<std::pair<int64_t, float>> SqliteVectorDB::search_with_ids(
   return scored_results;
 }
 
+int SqliteVectorDB::get_vector_dimension() const {
+  if (!db_) {
+    return 0;
+  }
+
+  const char* sql = "SELECT dim FROM vectors ORDER BY id LIMIT 1;";
+  sqlite3_stmt* stmt = nullptr;
+  int rc = sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr);
+  if (rc != SQLITE_OK) {
+    std::cerr << "[SqliteVectorDB] Failed to prepare vector dimension query: "
+              << sqlite3_errmsg(db_) << '\n';
+    return 0;
+  }
+
+  int dimension = 0;
+  rc = sqlite3_step(stmt);
+  if (rc == SQLITE_ROW) {
+    dimension = sqlite3_column_int(stmt, 0);
+  } else if (rc != SQLITE_DONE) {
+    std::cerr << "[SqliteVectorDB] Failed to read vector dimension: "
+              << sqlite3_errmsg(db_) << '\n';
+  }
+  sqlite3_finalize(stmt);
+  return dimension;
+}
+
+std::vector<std::pair<int64_t, std::vector<float>>> SqliteVectorDB::load_vectors_by_chunk_states(
+    const std::vector<ChunkState>& allowed_states) const {
+  std::vector<std::pair<int64_t, std::vector<float>>> rows;
+  if (!db_ || allowed_states.empty()) {
+    return rows;
+  }
+
+  std::unordered_set<std::string> allowed_state_names;
+  allowed_state_names.reserve(allowed_states.size());
+  for (const auto state : allowed_states) {
+    allowed_state_names.insert(chunk_state_name(state));
+  }
+
+  const char* sql = "SELECT id, dim, data FROM vectors ORDER BY id;";
+  sqlite3_stmt* stmt = nullptr;
+  int rc = sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr);
+  if (rc != SQLITE_OK) {
+    std::cerr << "[SqliteVectorDB] Failed to prepare state-filtered vector export: "
+              << sqlite3_errmsg(db_) << '\n';
+    return rows;
+  }
+
+  while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+    const auto id = static_cast<int64_t>(sqlite3_column_int64(stmt, 0));
+    if (allowed_state_names.count(load_chunk_state(db_, id)) == 0) {
+      continue;
+    }
+
+    const int dim = sqlite3_column_int(stmt, 1);
+    const void* blob = sqlite3_column_blob(stmt, 2);
+    const int bytes = sqlite3_column_bytes(stmt, 2);
+    auto vector = vector_from_blob(blob, bytes, dim);
+    if (!vector.empty()) {
+      rows.emplace_back(id, std::move(vector));
+    }
+  }
+
+  if (rc != SQLITE_DONE) {
+    std::cerr << "[SqliteVectorDB] Failed while exporting state-filtered vectors: "
+              << sqlite3_errmsg(db_) << '\n';
+    rows.clear();
+  }
+  sqlite3_finalize(stmt);
+  return rows;
+}
+
 std::vector<int64_t> SqliteVectorDB::filter_ids_by_chunk_states(
     const std::vector<int64_t>& candidate_ids,
     const std::vector<ChunkState>& allowed_states) const {

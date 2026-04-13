@@ -16,6 +16,7 @@ class CommandLineArgs {
   enum class Command {
     HELP,
     BUILD,
+    REBUILD_STATE_FILTERED_INDEX,
     QUERY,
     INTERACTIVE,
     UNKNOWN

@@ -13,6 +13,7 @@
 #include "loader/TextFileLoader.hpp"
 #include "embedding/MNNEmbedding.hpp"
 #include "vector_Index/FaissIndex.hpp"
+#include "vector_db/IngestUtils.hpp"
 #include "vector_db/SqliteVectorDB.hpp"
 #include "llm/LLMFactory.hpp"
 #include "dataset/TrivialQADataset.hpp"
@@ -225,6 +226,45 @@ int main(int argc, char** argv) {
     }
     return 0;
 
+  } else if (config.command == CommandLineArgs::Command::REBUILD_STATE_FILTERED_INDEX) {
+    if (config.verbose) {
+      std::cout << "[INFO] === OFFLINE PHASE: Rebuilding State-Filtered Index ===\n"
+                << "[INFO] SQLite DB: " << config.sqlite_db_path << '\n'
+                << "[INFO] Output index path: " << config.index_path << '\n'
+                << "[INFO] Allowed dense states: warm,hot\n";
+    }
+
+    if (!config.state_snapshot_in_path.empty()) {
+      if (!sqlite_db->import_chunk_state_snapshot(config.state_snapshot_in_path)) {
+        std::cerr << "[ERROR] Failed to import state snapshot: "
+                  << config.state_snapshot_in_path << '\n';
+        return 1;
+      }
+      std::cout << "✓ State snapshot imported from: "
+                << config.state_snapshot_in_path << '\n';
+    }
+
+    if (!rebuild_faiss_index_from_sqlite_by_chunk_states(
+            config.sqlite_db_path,
+            config.index_path,
+            {ChunkState::WARM, ChunkState::HOT},
+            config.faiss_index_type,
+            faiss::METRIC_INNER_PRODUCT)) {
+      std::cerr << "[ERROR] Failed to rebuild state-filtered index\n";
+      return 1;
+    }
+    std::cout << "✓ State-filtered index rebuilt at: " << config.index_path << '\n';
+
+    if (!config.state_snapshot_out_path.empty()) {
+      if (!sqlite_db->export_chunk_state_snapshot(config.state_snapshot_out_path)) {
+        std::cerr << "[ERROR] Failed to export state snapshot: "
+                  << config.state_snapshot_out_path << '\n';
+        return 1;
+      }
+      std::cout << "✓ State snapshot exported to: "
+                << config.state_snapshot_out_path << '\n';
+    }
+    return 0;
   } else if (config.command == CommandLineArgs::Command::QUERY) {
     // ========== 查询阶段 (Online/Query Phase) ==========
     // Only need: embedder, index, llm

@@ -287,7 +287,61 @@ bool build_faiss_index_from_vectors_file(
   return true;
 }
 
-}  // namespace mobile_rag
+bool rebuild_faiss_index_from_sqlite_by_chunk_states(
+    const std::string& sqlite_db_path,
+    const std::string& faiss_index_path,
+    const std::vector<ChunkState>& allowed_states,
+    const std::string& factory_desc,
+    faiss::MetricType metric) {
+  if (sqlite_db_path.empty() || faiss_index_path.empty() || allowed_states.empty()) {
+    std::cerr << "[Ingest] rebuild_faiss_index_from_sqlite_by_chunk_states: invalid arguments"
+              << '\n';
+    return false;
+  }
 
+  SqliteVectorDB db(sqlite_db_path);
+  const int dimension = db.get_vector_dimension();
+  if (dimension <= 0) {
+    std::cerr << "[Ingest] rebuild_faiss_index_from_sqlite_by_chunk_states: no vectors in SQLite"
+              << '\n';
+    return false;
+  }
+
+  const auto filtered_rows = db.load_vectors_by_chunk_states(allowed_states);
+  std::vector<std::vector<float>> vectors;
+  std::vector<int64_t> ids;
+  vectors.reserve(filtered_rows.size());
+  ids.reserve(filtered_rows.size());
+  for (const auto& [id, vector] : filtered_rows) {
+    ids.push_back(id);
+    vectors.push_back(vector);
+  }
+
+  auto index = std::make_shared<FaissIndex>(factory_desc, metric);
+  bool initialized = false;
+  if (vectors.empty()) {
+    initialized = index->initialize_empty(dimension);
+  } else {
+    initialized = index->add_vectors(vectors, ids);
+  }
+  if (!initialized) {
+    std::cerr << "[Ingest] rebuild_faiss_index_from_sqlite_by_chunk_states: failed to initialize Faiss index"
+              << '\n';
+    return false;
+  }
+
+  if (!index->save_index(faiss_index_path)) {
+    std::cerr << "[Ingest] rebuild_faiss_index_from_sqlite_by_chunk_states: failed to save index"
+              << '\n';
+    return false;
+  }
+
+  std::cout << "[Ingest] Rebuilt state-filtered FAISS index at "
+            << faiss_index_path
+            << " with " << filtered_rows.size() << " vectors\n";
+  return true;
+}
+
+}  // namespace mobile_rag
 
 

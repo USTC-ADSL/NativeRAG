@@ -167,6 +167,14 @@ std::vector<std::pair<int64_t, float>> FaissIndex::search(
   return results;
 }
 
+bool FaissIndex::initialize_empty(int dimension) {
+  if (dimension <= 0) {
+    std::cerr << "[FaissIndex] Refusing to initialize empty index with invalid dimension." << '\n';
+    return false;
+  }
+  return ensure_index_created(dimension);
+}
+
 bool FaissIndex::save_index(const std::string& index_path) {
   if (!index_) {
     std::cerr << "[FaissIndex] No index to save." << '\n';
@@ -197,6 +205,5 @@ bool FaissIndex::load_index(const std::string& index_path) {
 }
 
 }  // namespace mobile_rag
-
 
 

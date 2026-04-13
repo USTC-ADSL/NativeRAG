@@ -276,6 +276,8 @@ endif()
 
 add_executable(test_sqlite_vectordb_backend
     ${CMAKE_CURRENT_SOURCE_DIR}/group_c_vectordb/test_sqlite_vectordb_backend.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/vector_db/FaissIndex.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/vector_db/IngestUtils.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/vector_db/SqliteVectorDB.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/retrieval/SemanticHash.cpp
 )
@@ -284,11 +286,21 @@ target_include_directories(test_sqlite_vectordb_backend PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
 )
 
+if (DEFINED FAISS_INCLUDE_WRAPPER)
+    target_include_directories(test_sqlite_vectordb_backend SYSTEM PRIVATE
+        ${FAISS_INCLUDE_WRAPPER}
+    )
+endif()
+
 if (TARGET SQLite::SQLite3)
     target_link_libraries(test_sqlite_vectordb_backend PRIVATE SQLite::SQLite3)
 else()
     target_link_libraries(test_sqlite_vectordb_backend PRIVATE ${SQLite3_LIBRARIES})
     target_include_directories(test_sqlite_vectordb_backend PRIVATE ${SQLite3_INCLUDE_DIRS})
+endif()
+
+if (FAISS_LIBRARY)
+    target_link_libraries(test_sqlite_vectordb_backend PRIVATE ${FAISS_LIBRARY})
 endif()
 
 # RAGPipelineWithDataset library
