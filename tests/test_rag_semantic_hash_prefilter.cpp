@@ -245,6 +245,7 @@ void test_adaptive_graph_logs_controller_selection() {
       {1.0f, -1.0f},
   };
   assert(pipeline.ingest(texts, vectors, "adaptive-controller-test"));
+  assert(sqlite_db->get_chunk_state(1) == "warm");
 
   const std::string query = "sqlite metadata retrieval traces";
   embedder->query_embeddings[query] = {1.0f, -1.0f};
@@ -257,6 +258,8 @@ void test_adaptive_graph_logs_controller_selection() {
   assert(run.stdout_text.find("budget=tight") != std::string::npos);
   assert(run.stdout_text.find("initial_graph=lexical_prefilter") != std::string::npos);
   assert(run.stdout_text.find("reason=term_rich_query") != std::string::npos);
+  assert(sqlite_db->get_chunk_state(1) == "hot");
+  assert(sqlite_db->count_chunk_state_transitions(1) == 2);
 
   std::filesystem::remove(db_path);
 }

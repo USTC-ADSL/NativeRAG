@@ -43,12 +43,15 @@ int main() {
 
     assert(db.add_vectors(vectors, ids));
     assert(db.add_texts(texts, ids));
+    assert(db.initialize_chunk_states(ids, ChunkState::WARM, "index_build"));
 
     const auto alpha_results = db.search({1.0f, 0.0f, 0.0f}, 2);
     assert(alpha_results.size() == 2);
     assert_top_result(alpha_results, 10);
     assert(alpha_results[1].first == 30);
     assert(db.get_text_for_id(30) == "alpha-ish");
+    assert(db.get_chunk_state(10) == "warm");
+    assert(db.count_chunk_state_transitions(10) == 1);
 
     const auto beta_results = db.search({0.0f, 1.0f, 0.0f}, 1);
     assert(beta_results.size() == 1);
@@ -58,6 +61,10 @@ int main() {
     assert(lexical_results.size() == 2);
     assert(lexical_results[0].first == 10);
     assert(lexical_results[1].first == 30);
+
+    assert(db.update_chunk_state(10, ChunkState::HOT, "retrieval_hit"));
+    assert(db.get_chunk_state(10) == "hot");
+    assert(db.count_chunk_state_transitions(10) == 2);
   }
 
   {
@@ -71,6 +78,11 @@ int main() {
     const auto reopened_lexical = reopened.search_text_lexical("beta", 1);
     assert(reopened_lexical.size() == 1);
     assert(reopened_lexical[0].first == 20);
+    assert(reopened.get_chunk_state(10) == "hot");
+    assert(reopened.count_chunk_state_transitions(10) == 2);
+    assert(reopened.update_chunk_state(10, ChunkState::COLD, "manual_demotion"));
+    assert(reopened.get_chunk_state(10) == "cold");
+    assert(reopened.count_chunk_state_transitions(10) == 3);
   }
 
   {

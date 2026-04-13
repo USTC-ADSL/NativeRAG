@@ -258,6 +258,11 @@ bool RAGPipeline::add_text_embeddings(const std::vector<std::string>& texts,
       std::cout << "[RAGPipeline] Persisted " << semantic_hashes.size()
                 << " semantic hashes to SQLite\n";
     }
+
+    if (!sqlite_db_->initialize_chunk_states(ids, ChunkState::WARM, "index_build")) {
+      std::cerr << "[RAGPipeline] Warning: Failed to initialize chunk states in SQLite for "
+                << source_label << '\n';
+    }
   }
 
   return true;
@@ -520,6 +525,19 @@ std::string RAGPipeline::answer_query(const std::string& query) {
                 << " score=" << std::fixed << std::setprecision(4) << score
                 << " | (text not found)" << '\n';
     }
+  }
+
+  if (sqlite_db_) {
+    int promoted_to_hot = 0;
+    for (const auto& [id, /*score*/ _] : execution.results) {
+      const auto previous_state = sqlite_db_->get_chunk_state(id);
+      if (sqlite_db_->update_chunk_state(id, ChunkState::HOT, "query_retrieval_hit") &&
+          previous_state != chunk_state_name(ChunkState::HOT)) {
+        ++promoted_to_hot;
+      }
+    }
+    std::cout << "[INDEX_STATE] promoted_to_hot=" << promoted_to_hot
+              << " retrieved_chunks=" << execution.results.size() << '\n';
   }
 
   std::cout << "[EVIDENCE] top_score=" << std::fixed << std::setprecision(4)

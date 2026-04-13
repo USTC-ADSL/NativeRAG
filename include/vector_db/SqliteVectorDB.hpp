@@ -12,6 +12,14 @@
 
 namespace mobile_rag {
 
+enum class ChunkState {
+  COLD,
+  WARM,
+  HOT,
+};
+
+const char* chunk_state_name(ChunkState state);
+
 class SqliteVectorDB : public IVectorDB {
  public:
   explicit SqliteVectorDB(const std::string& db_path = ":memory:");
@@ -46,6 +54,14 @@ class SqliteVectorDB : public IVectorDB {
       const std::vector<float>& query_vector,
       const std::vector<int64_t>& candidate_ids,
       int k) const;
+  bool initialize_chunk_states(const std::vector<int64_t>& ids,
+                               ChunkState state,
+                               const std::string& reason);
+  bool update_chunk_state(int64_t id,
+                          ChunkState new_state,
+                          const std::string& reason);
+  std::string get_chunk_state(int64_t id) const;
+  int count_chunk_state_transitions(int64_t id) const;
 
  private:
   bool initialize_schema();

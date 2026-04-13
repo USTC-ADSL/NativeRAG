@@ -1,6 +1,7 @@
 #include "vector_db/SqliteVectorDB.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cctype>
 #include <cmath>
 #include <cstring>
@@ -139,6 +140,122 @@ std::vector<float> vector_from_blob(const void* blob, int bytes, int dim) {
   std::memcpy(values.data(), blob, static_cast<size_t>(bytes));
   return values;
 }
+
+sqlite3_int64 unix_time_ms_now() {
+  using namespace std::chrono;
+  return static_cast<sqlite3_int64>(
+      duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count());
+}
+
+std::string load_chunk_state(sqlite3* db, int64_t id) {
+  if (!db) {
+    return {};
+  }
+
+  const char* sql = "SELECT tier FROM chunk_states WHERE id = ?;";
+  sqlite3_stmt* stmt = nullptr;
+  int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr);
+  if (rc != SQLITE_OK) {
+    return {};
+  }
+
+  rc = sqlite3_bind_int64(stmt, 1, static_cast<sqlite3_int64>(id));
+  if (rc != SQLITE_OK) {
+    sqlite3_finalize(stmt);
+    return {};
+  }
+
+  std::string state;
+  rc = sqlite3_step(stmt);
+  if (rc == SQLITE_ROW) {
+    const unsigned char* text = sqlite3_column_text(stmt, 0);
+    if (text) {
+      state.assign(reinterpret_cast<const char*>(text));
+    }
+  }
+  sqlite3_finalize(stmt);
+  return state;
+}
+
+bool write_chunk_state_row(sqlite3* db,
+                           int64_t id,
+                           const std::string& state,
+                           const std::string& reason,
+                           sqlite3_int64 timestamp_ms) {
+  const char* sql =
+      "INSERT INTO chunk_states (id, tier, last_transition_reason, last_transition_at_unix_ms) "
+      "VALUES (?, ?, ?, ?) "
+      "ON CONFLICT(id) DO UPDATE SET tier=excluded.tier, "
+      "last_transition_reason=excluded.last_transition_reason, "
+      "last_transition_at_unix_ms=excluded.last_transition_at_unix_ms;";
+  sqlite3_stmt* stmt = nullptr;
+  int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr);
+  if (rc != SQLITE_OK) {
+    return false;
+  }
+
+  rc = sqlite3_bind_int64(stmt, 1, static_cast<sqlite3_int64>(id));
+  rc = (rc == SQLITE_OK) ? sqlite3_bind_text(stmt, 2, state.c_str(), -1, SQLITE_TRANSIENT) : rc;
+  rc = (rc == SQLITE_OK) ? sqlite3_bind_text(stmt, 3, reason.c_str(), -1, SQLITE_TRANSIENT) : rc;
+  rc = (rc == SQLITE_OK) ? sqlite3_bind_int64(stmt, 4, timestamp_ms) : rc;
+  if (rc != SQLITE_OK) {
+    sqlite3_finalize(stmt);
+    return false;
+  }
+
+  rc = sqlite3_step(stmt);
+  sqlite3_finalize(stmt);
+  return rc == SQLITE_DONE;
+}
+
+bool write_chunk_transition_row(sqlite3* db,
+                                int64_t id,
+                                const std::string& from_state,
+                                const std::string& to_state,
+                                const std::string& reason,
+                                sqlite3_int64 timestamp_ms) {
+  const char* sql =
+      "INSERT INTO chunk_state_transitions "
+      "(id, from_tier, to_tier, reason, created_at_unix_ms) VALUES (?, ?, ?, ?, ?);";
+  sqlite3_stmt* stmt = nullptr;
+  int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr);
+  if (rc != SQLITE_OK) {
+    return false;
+  }
+
+  rc = sqlite3_bind_int64(stmt, 1, static_cast<sqlite3_int64>(id));
+  rc = (rc == SQLITE_OK)
+           ? sqlite3_bind_text(stmt, 2, from_state.c_str(), -1, SQLITE_TRANSIENT)
+           : rc;
+  rc = (rc == SQLITE_OK)
+           ? sqlite3_bind_text(stmt, 3, to_state.c_str(), -1, SQLITE_TRANSIENT)
+           : rc;
+  rc = (rc == SQLITE_OK)
+           ? sqlite3_bind_text(stmt, 4, reason.c_str(), -1, SQLITE_TRANSIENT)
+           : rc;
+  rc = (rc == SQLITE_OK) ? sqlite3_bind_int64(stmt, 5, timestamp_ms) : rc;
+  if (rc != SQLITE_OK) {
+    sqlite3_finalize(stmt);
+    return false;
+  }
+
+  rc = sqlite3_step(stmt);
+  sqlite3_finalize(stmt);
+  return rc == SQLITE_DONE;
+}
+
+}  // namespace
+
+const char* chunk_state_name(ChunkState state) {
+  switch (state) {
+    case ChunkState::COLD:
+      return "cold";
+    case ChunkState::WARM:
+      return "warm";
+    case ChunkState::HOT:
+      return "hot";
+  }
+  return "unknown";
 }
 
 SqliteVectorDB::SqliteVectorDB(const std::string& db_path) : db_path_(db_path) {
@@ -177,7 +294,24 @@ bool SqliteVectorDB::initialize_schema() {
       "bit_count INTEGER NOT NULL,"
       "code BLOB NOT NULL"
       ");"
-      "CREATE INDEX IF NOT EXISTS idx_semantic_hashes_id ON semantic_hashes(id);";
+      "CREATE INDEX IF NOT EXISTS idx_semantic_hashes_id ON semantic_hashes(id);"
+      "CREATE TABLE IF NOT EXISTS chunk_states ("
+      "id INTEGER PRIMARY KEY,"
+      "tier TEXT NOT NULL,"
+      "last_transition_reason TEXT NOT NULL,"
+      "last_transition_at_unix_ms INTEGER NOT NULL"
+      ");"
+      "CREATE INDEX IF NOT EXISTS idx_chunk_states_tier ON chunk_states(tier);"
+      "CREATE TABLE IF NOT EXISTS chunk_state_transitions ("
+      "event_id INTEGER PRIMARY KEY AUTOINCREMENT,"
+      "id INTEGER NOT NULL,"
+      "from_tier TEXT NOT NULL,"
+      "to_tier TEXT NOT NULL,"
+      "reason TEXT NOT NULL,"
+      "created_at_unix_ms INTEGER NOT NULL"
+      ");"
+      "CREATE INDEX IF NOT EXISTS idx_chunk_state_transitions_id "
+      "ON chunk_state_transitions(id);";
   char* err = nullptr;
   if (sqlite3_exec(db_, create_table_sql, exec_noop_callback, nullptr, &err) !=
       SQLITE_OK) {
@@ -915,6 +1049,77 @@ std::string SqliteVectorDB::get_text_for_id(int64_t id) const {
   }
   sqlite3_finalize(stmt);
   return out;
+}
+
+bool SqliteVectorDB::initialize_chunk_states(const std::vector<int64_t>& ids,
+                                             ChunkState state,
+                                             const std::string& reason) {
+  if (!db_) return false;
+  if (ids.empty()) return true;
+
+  char* err = nullptr;
+  if (sqlite3_exec(db_, "BEGIN TRANSACTION;", nullptr, nullptr, &err) != SQLITE_OK) {
+    if (err) sqlite3_free(err);
+    return false;
+  }
+
+  const std::string target_state = chunk_state_name(state);
+  for (const auto id : ids) {
+    const std::string current_state = load_chunk_state(db_, id);
+    if (current_state == target_state) {
+      continue;
+    }
+
+    const auto timestamp_ms = unix_time_ms_now();
+    const std::string from_state = current_state.empty() ? "unknown" : current_state;
+    if (!write_chunk_state_row(db_, id, target_state, reason, timestamp_ms) ||
+        !write_chunk_transition_row(db_, id, from_state, target_state, reason, timestamp_ms)) {
+      sqlite3_exec(db_, "ROLLBACK;", nullptr, nullptr, nullptr);
+      return false;
+    }
+  }
+
+  if (sqlite3_exec(db_, "COMMIT;", nullptr, nullptr, &err) != SQLITE_OK) {
+    if (err) sqlite3_free(err);
+    return false;
+  }
+  if (err) sqlite3_free(err);
+  return true;
+}
+
+bool SqliteVectorDB::update_chunk_state(int64_t id,
+                                        ChunkState new_state,
+                                        const std::string& reason) {
+  return initialize_chunk_states({id}, new_state, reason);
+}
+
+std::string SqliteVectorDB::get_chunk_state(int64_t id) const {
+  return load_chunk_state(db_, id);
+}
+
+int SqliteVectorDB::count_chunk_state_transitions(int64_t id) const {
+  if (!db_) return 0;
+
+  const char* sql = "SELECT COUNT(*) FROM chunk_state_transitions WHERE id = ?;";
+  sqlite3_stmt* stmt = nullptr;
+  int rc = sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr);
+  if (rc != SQLITE_OK) {
+    return 0;
+  }
+
+  rc = sqlite3_bind_int64(stmt, 1, static_cast<sqlite3_int64>(id));
+  if (rc != SQLITE_OK) {
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+
+  int count = 0;
+  rc = sqlite3_step(stmt);
+  if (rc == SQLITE_ROW) {
+    count = sqlite3_column_int(stmt, 0);
+  }
+  sqlite3_finalize(stmt);
+  return count;
 }
 
 }  // namespace mobile_rag
