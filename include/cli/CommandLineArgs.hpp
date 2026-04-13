@@ -67,6 +67,7 @@ class CommandLineArgs {
     bool load_index = true;
     bool lexical_prefilter = false;
     bool semantic_hash_prefilter = false;
+    bool adaptive_graph = false;
   };
 
   CommandLineArgs(int argc, char** argv);

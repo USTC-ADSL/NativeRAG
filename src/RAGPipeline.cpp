@@ -93,6 +93,27 @@ std::string fallback_answer_from_chunks(const std::string& query,
   return trim_copy(chunks.front());
 }
 
+struct RetrievalExecution {
+  std::vector<std::pair<int64_t, float>> results;
+  size_t lexical_candidate_count = 0;
+  size_t hash_candidate_count = 0;
+  std::string fallback_reason = "prefilter_disabled";
+};
+
+RetrievalGraph graph_from_prefilter_flags(bool lexical_prefilter_enabled,
+                                          bool semantic_hash_prefilter_enabled) {
+  if (lexical_prefilter_enabled && semantic_hash_prefilter_enabled) {
+    return RetrievalGraph::LEXICAL_HASH_PREFILTER;
+  }
+  if (lexical_prefilter_enabled) {
+    return RetrievalGraph::LEXICAL_PREFILTER;
+  }
+  if (semantic_hash_prefilter_enabled) {
+    return RetrievalGraph::SEMANTIC_HASH_PREFILTER;
+  }
+  return RetrievalGraph::DENSE_ONLY;
+}
+
 }  // namespace
 
 RAGPipeline::RAGPipeline(std::shared_ptr<IDocumentLoader> loader,
@@ -123,6 +144,10 @@ void RAGPipeline::set_lexical_prefilter(LexicalPrefilterConfig config) {
   lexical_prefilter_.enabled = config.enabled;
   lexical_prefilter_.candidate_limit =
       std::max(top_k_, std::max(1, config.candidate_limit));
+}
+
+void RAGPipeline::set_graph_selector_config(GraphSelector::Config config) {
+  graph_selector_.set_config(config);
 }
 
 bool RAGPipeline::add_text_embeddings(const std::vector<std::string>& texts,
@@ -324,29 +349,44 @@ std::string RAGPipeline::answer_query(const std::string& query) {
     return {};
   }
 
-  std::vector<std::pair<int64_t, float>> results;
-  std::string retrieval_mode = "dense_only";
-  std::string fallback_reason = "prefilter_disabled";
-  size_t lexical_candidate_count = 0;
-  size_t hash_candidate_count = 0;
+  GraphSelector::Availability availability;
+  availability.sqlite_available = sqlite_db_ != nullptr;
+  availability.lexical_graph_available = lexical_prefilter_.enabled;
+  availability.semantic_hash_graph_available = semantic_hash_prefilter_.enabled;
 
-  if ((lexical_prefilter_.enabled || semantic_hash_prefilter_.enabled) && sqlite_db_) {
-    if (lexical_prefilter_.enabled && semantic_hash_prefilter_.enabled) {
-      retrieval_mode = "lexical_hash_prefilter";
-    } else if (lexical_prefilter_.enabled) {
-      retrieval_mode = "lexical_prefilter";
-    } else {
-      retrieval_mode = "semantic_hash_prefilter";
+  RetrievalGraph active_graph =
+      graph_from_prefilter_flags(lexical_prefilter_.enabled, semantic_hash_prefilter_.enabled);
+  if (graph_selector_.config().enabled) {
+    const auto initial_decision = graph_selector_.choose_initial_graph(query, availability);
+    active_graph = initial_decision.graph;
+    std::cout << "[CONTROLLER] adaptive=on initial_graph="
+              << retrieval_graph_name(active_graph)
+              << " reason=" << initial_decision.reason << '\n';
+  }
+
+  auto execute_retrieval = [&](RetrievalGraph graph) {
+    RetrievalExecution execution;
+    if (graph == RetrievalGraph::DENSE_ONLY) {
+      execution.results = index_->search(q, top_k_);
+      return execution;
     }
-    fallback_reason = "none";
+
+    if (!sqlite_db_) {
+      execution.fallback_reason = "sqlite_unavailable";
+      execution.results = index_->search(q, top_k_);
+      return execution;
+    }
+
+    execution.fallback_reason = "none";
 
     std::vector<int64_t> candidate_ids;
     std::unordered_set<int64_t> seen_ids;
 
-    if (lexical_prefilter_.enabled) {
-      const auto lexical_matches = sqlite_db_->search_text_lexical(
-          query, lexical_prefilter_.candidate_limit);
-      lexical_candidate_count = lexical_matches.size();
+    if (graph == RetrievalGraph::LEXICAL_PREFILTER ||
+        graph == RetrievalGraph::LEXICAL_HASH_PREFILTER) {
+      const auto lexical_matches =
+          sqlite_db_->search_text_lexical(query, lexical_prefilter_.candidate_limit);
+      execution.lexical_candidate_count = lexical_matches.size();
       candidate_ids.reserve(candidate_ids.size() + lexical_matches.size());
       for (const auto& [id, /*score*/ _] : lexical_matches) {
         if (seen_ids.insert(id).second) {
@@ -355,13 +395,14 @@ std::string RAGPipeline::answer_query(const std::string& query) {
       }
     }
 
-    if (semantic_hash_prefilter_.enabled) {
+    if (graph == RetrievalGraph::SEMANTIC_HASH_PREFILTER ||
+        graph == RetrievalGraph::LEXICAL_HASH_PREFILTER) {
       const auto query_code = build_sign_semantic_hash(q);
       const auto hash_matches = sqlite_db_->search_by_semantic_hash(
           query_code,
           semantic_hash_prefilter_.candidate_limit,
           semantic_hash_prefilter_.max_hamming_distance);
-      hash_candidate_count = hash_matches.size();
+      execution.hash_candidate_count = hash_matches.size();
       candidate_ids.reserve(candidate_ids.size() + hash_matches.size());
       for (const auto& [id, /*distance*/ _] : hash_matches) {
         if (seen_ids.insert(id).second) {
@@ -371,65 +412,88 @@ std::string RAGPipeline::answer_query(const std::string& query) {
     }
 
     if (!candidate_ids.empty()) {
-      results = sqlite_db_->search_with_ids(q, candidate_ids, top_k_);
-      if (results.empty()) {
-        fallback_reason = "sqlite_rerank_empty";
+      execution.results = sqlite_db_->search_with_ids(q, candidate_ids, top_k_);
+      if (execution.results.empty()) {
+        execution.fallback_reason = "sqlite_rerank_empty";
       }
     } else {
-      fallback_reason = "empty_shortlist";
+      execution.fallback_reason = "empty_shortlist";
     }
 
-    if (results.empty()) {
-      results = index_->search(q, top_k_);
+    if (execution.results.empty()) {
+      execution.results = index_->search(q, top_k_);
     }
-  } else if (lexical_prefilter_.enabled || semantic_hash_prefilter_.enabled) {
-    if (lexical_prefilter_.enabled && semantic_hash_prefilter_.enabled) {
-      retrieval_mode = "lexical_hash_prefilter";
-    } else if (lexical_prefilter_.enabled) {
-      retrieval_mode = "lexical_prefilter";
-    } else {
-      retrieval_mode = "semantic_hash_prefilter";
-    }
-    fallback_reason = "sqlite_unavailable";
-    results = index_->search(q, top_k_);
-  } else {
-    results = index_->search(q, top_k_);
-  }
 
-  std::cout << "[RETRIEVAL] mode=" << retrieval_mode
-            << " lexical_candidates=" << lexical_candidate_count
-            << " hash_candidates=" << hash_candidate_count
-            << " dense_results=" << results.size()
-            << " fallback=" << fallback_reason << '\n';
+    return execution;
+  };
 
-  // Print query and retrieval results for debugging/inspection
-  std::cout << "\n[QUERY] " << query << '\n';
-  if (results.empty()) {
-    std::cout << "[RETRIEVAL] No results\n";
-  }
-
-  std::vector<std::string> retrieved_chunks;
-  retrieved_chunks.reserve(results.size());
-  for (size_t rank = 0; rank < results.size(); ++rank) {
-    const auto& [id, score] = results[rank];
+  auto resolve_chunk_text = [&](int64_t id) {
     std::string chunk;
-
-    // Try to get text from SQLite first (persistent storage)
     if (sqlite_db_) {
       chunk = sqlite_db_->get_text_for_id(id);
     }
-
-    // Fall back to in-memory mapping if SQLite is not available
     if (chunk.empty()) {
       auto it = id_to_chunk_.find(id);
       if (it != id_to_chunk_.end()) {
         chunk = it->second;
       }
     }
+    return chunk;
+  };
+
+  auto collect_chunks = [&](const std::vector<std::pair<int64_t, float>>& ranked_results) {
+    std::vector<std::string> chunks;
+    chunks.reserve(ranked_results.size());
+    for (const auto& [id, /*score*/ _] : ranked_results) {
+      chunks.push_back(resolve_chunk_text(id));
+    }
+    return chunks;
+  };
+
+  RetrievalExecution execution = execute_retrieval(active_graph);
+  auto retrieved_chunks = collect_chunks(execution.results);
+  auto evidence_features =
+      compute_evidence_features(query, execution.results, retrieved_chunks);
+
+  std::string final_controller_reason = "adaptive_disabled";
+  if (graph_selector_.config().enabled) {
+    const auto escalation =
+        graph_selector_.maybe_escalate(active_graph, availability, evidence_features);
+    final_controller_reason = escalation.reason;
+    if (escalation.escalated && escalation.graph != active_graph) {
+      std::cout << "[CONTROLLER] escalate_from=" << retrieval_graph_name(active_graph)
+                << " to=" << retrieval_graph_name(escalation.graph)
+                << " reason=" << escalation.reason
+                << " coverage_ratio=" << std::fixed << std::setprecision(4)
+                << evidence_features.coverage_ratio
+                << " score_margin=" << evidence_features.score_margin << '\n';
+      active_graph = escalation.graph;
+      execution = execute_retrieval(active_graph);
+      retrieved_chunks = collect_chunks(execution.results);
+      evidence_features =
+          compute_evidence_features(query, execution.results, retrieved_chunks);
+    }
+    std::cout << "[CONTROLLER] final_graph=" << retrieval_graph_name(active_graph)
+              << " reason=" << final_controller_reason << '\n';
+  }
+
+  std::cout << "[RETRIEVAL] mode=" << retrieval_graph_name(active_graph)
+            << " lexical_candidates=" << execution.lexical_candidate_count
+            << " hash_candidates=" << execution.hash_candidate_count
+            << " dense_results=" << execution.results.size()
+            << " fallback=" << execution.fallback_reason << '\n';
+
+  // Print query and retrieval results for debugging/inspection
+  std::cout << "\n[QUERY] " << query << '\n';
+  if (execution.results.empty()) {
+    std::cout << "[RETRIEVAL] No results\n";
+  }
+
+  for (size_t rank = 0; rank < execution.results.size(); ++rank) {
+    const auto& [id, score] = execution.results[rank];
+    const auto& chunk = retrieved_chunks[rank];
 
     if (!chunk.empty()) {
-      retrieved_chunks.push_back(chunk);
-      // Prepare a one-line preview
       std::string preview = chunk.substr(0, 120);
       for (char& c : preview) {
         if (c == '\n' || c == '\r' || c == '\t') c = ' ';
@@ -444,8 +508,6 @@ std::string RAGPipeline::answer_query(const std::string& query) {
     }
   }
 
-  const auto evidence_features =
-      compute_evidence_features(query, results, retrieved_chunks);
   std::cout << "[EVIDENCE] top_score=" << std::fixed << std::setprecision(4)
             << evidence_features.top_score
             << " second_score=" << evidence_features.second_score

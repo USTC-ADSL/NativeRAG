@@ -1,12 +1,15 @@
 #include <cassert>
 #include <filesystem>
+#include <iostream>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
 #include "RAGPipeline.hpp"
+#include "controller/GraphSelector.hpp"
 #include "embedding/IEmbeddingModel.hpp"
 #include "llm/ILargeLanguageModel.hpp"
 #include "llm/PromptUtils.hpp"
@@ -97,8 +100,24 @@ class TestableRAGPipeline : public RAGPipeline {
   }
 };
 
+struct QueryRunResult {
+  std::string answer;
+  std::string stdout_text;
+};
+
 std::string make_temp_db_path(const std::string& suffix) {
   return "/tmp/native_rag_semantic_hash_prefilter_" + suffix + ".sqlite3";
+}
+
+QueryRunResult run_query_and_capture_stdout(TestableRAGPipeline& pipeline,
+                                            const std::string& query) {
+  std::ostringstream captured_stdout;
+  auto* old_stdout = std::cout.rdbuf(captured_stdout.rdbuf());
+
+  const std::string answer = pipeline.answer_query(query);
+
+  std::cout.rdbuf(old_stdout);
+  return {answer, captured_stdout.str()};
 }
 
 void test_prefilter_uses_sqlite_rerank_before_dense_fallback() {
@@ -203,11 +222,50 @@ void test_lexical_and_hash_shortlists_are_merged_before_dense_rerank() {
   std::filesystem::remove(db_path);
 }
 
+void test_adaptive_graph_logs_controller_selection() {
+  const std::string db_path = make_temp_db_path("adaptive-controller");
+  std::filesystem::remove(db_path);
+
+  auto sqlite_db = std::make_shared<SqliteVectorDB>(db_path);
+  auto embedder = std::make_shared<FakeEmbeddingModel>();
+  auto index = std::make_shared<FakeVectorIndex>();
+  auto llm = std::make_shared<FakeLLM>();
+
+  TestableRAGPipeline pipeline(nullptr, embedder, index, llm, sqlite_db, 1, 128, 16);
+  pipeline.set_lexical_prefilter({true, 1});
+  pipeline.set_semantic_hash_prefilter({true, 1, 0});
+  pipeline.set_graph_selector_config({true, 3, 0.15f, 0.50f});
+
+  const std::vector<std::string> texts = {
+      "Unrelated dense chunk without sqlite keyword.",
+      "SQLite stores metadata and traces for this project.",
+  };
+  const std::vector<std::vector<float>> vectors = {
+      {1.0f, 1.0f},
+      {1.0f, -1.0f},
+  };
+  assert(pipeline.ingest(texts, vectors, "adaptive-controller-test"));
+
+  const std::string query = "sqlite metadata retrieval traces";
+  embedder->query_embeddings[query] = {1.0f, -1.0f};
+  index->search_results = {{0, 0.99f}};
+
+  const auto run = run_query_and_capture_stdout(pipeline, query);
+  assert(run.answer.find("SQLite stores metadata and traces for this project.") !=
+         std::string::npos);
+  assert(run.stdout_text.find("[CONTROLLER]") != std::string::npos);
+  assert(run.stdout_text.find("initial_graph=lexical_prefilter") != std::string::npos);
+  assert(run.stdout_text.find("reason=term_rich_query") != std::string::npos);
+
+  std::filesystem::remove(db_path);
+}
+
 }  // namespace
 
 int main() {
   test_prefilter_uses_sqlite_rerank_before_dense_fallback();
   test_prefilter_falls_back_to_dense_search_when_shortlist_is_empty();
   test_lexical_and_hash_shortlists_are_merged_before_dense_rerank();
+  test_adaptive_graph_logs_controller_selection();
   return 0;
 }

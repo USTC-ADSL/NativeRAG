@@ -103,6 +103,8 @@ bool CommandLineArgs::parse_options() {
       config_.semantic_hash_candidate_limit = std::stoi(argv_[++i]);
     } else if (arg == "--semantic-hash-max-distance" && i + 1 < argc_) {
       config_.semantic_hash_max_distance = std::stoi(argv_[++i]);
+    } else if (arg == "--adaptive-graph") {
+      config_.adaptive_graph = true;
     } else if (arg == "--chunk-size" && i + 1 < argc_) {
       config_.chunk_size = static_cast<size_t>(std::stoull(argv_[++i]));
     } else if (arg == "--chunk-overlap" && i + 1 < argc_) {
@@ -363,6 +365,7 @@ void CommandLineArgs::print_help() const {
             << "                               Semantic-hash shortlist size (default: 32)\n"
             << "  --semantic-hash-max-distance <num>\n"
             << "                               Max Hamming distance for shortlist, -1 disables the cap (default: -1)\n"
+            << "  --adaptive-graph            Enable heuristic graph selection and evidence-based upgrades\n"
             << "  --chunk-size <num>           Chunk size for offline indexing (default: 1000)\n"
             << "  --chunk-overlap <num>        Chunk overlap for offline indexing (default: 200)\n"
             << "  --verbose, -v                Enable verbose output\n"

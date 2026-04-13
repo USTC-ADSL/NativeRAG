@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "loader/IDocumentLoader.hpp"
+#include "controller/GraphSelector.hpp"
 #include "embedding/IEmbeddingModel.hpp"
 #include "vector_Index/IVectorIndex.hpp"
 #include "llm/ILargeLanguageModel.hpp"
@@ -65,6 +66,7 @@ class RAGPipeline {
 
   void set_semantic_hash_prefilter(SemanticHashPrefilterConfig config);
   void set_lexical_prefilter(LexicalPrefilterConfig config);
+  void set_graph_selector_config(GraphSelector::Config config);
 
  protected:
   bool add_text_embeddings(const std::vector<std::string>& texts,
@@ -84,6 +86,7 @@ class RAGPipeline {
   size_t chunk_overlap_ = 200;
   SemanticHashPrefilterConfig semantic_hash_prefilter_;
   LexicalPrefilterConfig lexical_prefilter_;
+  GraphSelector graph_selector_;
 };
 
 }  // namespace mobile_rag

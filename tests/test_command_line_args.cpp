@@ -87,6 +87,7 @@ void test_query_parses_semantic_hash_prefilter_flags() {
       "24",
       "--semantic-hash-max-distance",
       "12",
+      "--adaptive-graph",
   };
 
   std::vector<char*> argv;
@@ -105,6 +106,7 @@ void test_query_parses_semantic_hash_prefilter_flags() {
   assert(config.semantic_hash_prefilter);
   assert(config.semantic_hash_candidate_limit == 24);
   assert(config.semantic_hash_max_distance == 12);
+  assert(config.adaptive_graph);
 
   std::filesystem::remove(llm_path);
   std::filesystem::remove(embedding_path);

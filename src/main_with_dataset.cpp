@@ -70,6 +70,8 @@ int main(int argc, char** argv) {
               << config.semantic_hash_candidate_limit << '\n'
               << "  Semantic Hash Max Distance: "
               << config.semantic_hash_max_distance << '\n'
+              << "  Adaptive Graph: "
+              << (config.adaptive_graph ? "enabled" : "disabled") << '\n'
               << "  Chunk Size: " << config.chunk_size << '\n'
               << "  Chunk Overlap: " << config.chunk_overlap << '\n';
   }
@@ -105,6 +107,9 @@ int main(int argc, char** argv) {
     RAGPipelineWithDataset pipeline(loader, embedder, index, nullptr, sqlite_db,
                                     config.top_k, config.chunk_size,
                                     config.chunk_overlap);
+    GraphSelector::Config graph_selector_config;
+    graph_selector_config.enabled = config.adaptive_graph;
+    pipeline.set_graph_selector_config(graph_selector_config);
     pipeline.set_lexical_prefilter(
         {config.lexical_prefilter,
          config.lexical_candidate_limit});
@@ -193,6 +198,9 @@ int main(int argc, char** argv) {
     RAGPipelineWithDataset pipeline(nullptr, embedder, index, llm, sqlite_db,
                                     config.top_k, config.chunk_size,
                                     config.chunk_overlap);
+    GraphSelector::Config graph_selector_config;
+    graph_selector_config.enabled = config.adaptive_graph;
+    pipeline.set_graph_selector_config(graph_selector_config);
     pipeline.set_lexical_prefilter(
         {config.lexical_prefilter,
          config.lexical_candidate_limit});
@@ -265,6 +273,9 @@ int main(int argc, char** argv) {
     RAGPipelineWithDataset pipeline(nullptr, embedder, index, llm, sqlite_db,
                                     config.top_k, config.chunk_size,
                                     config.chunk_overlap);
+    GraphSelector::Config graph_selector_config;
+    graph_selector_config.enabled = config.adaptive_graph;
+    pipeline.set_graph_selector_config(graph_selector_config);
     pipeline.set_lexical_prefilter(
         {config.lexical_prefilter,
          config.lexical_candidate_limit});
