@@ -188,6 +188,31 @@ GraphSelector::Decision GraphSelector::maybe_escalate(
     return {current_graph, "already_richest_graph", false};
   }
 
+  const bool unresolved_constraints =
+      evidence.unresolved_constraint_count > 0;
+  if (unresolved_constraints) {
+    if (classify_budget(availability, budget) == BudgetClass::TIGHT) {
+      return {current_graph, "budget_limited", false};
+    }
+
+    const bool lexical = lexical_available(availability);
+    const bool semantic = semantic_available(availability);
+    if (lexical && semantic) {
+      return {RetrievalGraph::LEXICAL_HASH_PREFILTER,
+              "constraint_uncovered_upgrade", true};
+    }
+    if (current_graph == RetrievalGraph::DENSE_ONLY) {
+      if (lexical) {
+        return {RetrievalGraph::LEXICAL_PREFILTER,
+                "constraint_uncovered_upgrade", true};
+      }
+      if (semantic) {
+        return {RetrievalGraph::SEMANTIC_HASH_PREFILTER,
+                "constraint_uncovered_upgrade", true};
+      }
+    }
+  }
+
   const bool weak_evidence =
       evidence.retrieved_chunk_count == 0 ||
       evidence.coverage_ratio < config_.min_coverage_ratio ||

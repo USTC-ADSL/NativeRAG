@@ -48,6 +48,41 @@ int main() {
   expect_equal(features.query_term_count, 3, "query_term_count");
   expect_equal(features.covered_query_terms, 2, "covered_query_terms");
   expect_close(features.coverage_ratio, 2.0f / 3.0f, 1e-5f, "coverage_ratio");
+  expect_equal(features.numeric_constraint_count, 0, "numeric_constraint_count");
+  expect_equal(features.covered_numeric_constraints, 0, "covered_numeric_constraints");
+  expect_equal(features.unresolved_numeric_constraints, 0, "unresolved_numeric_constraints");
+  expect_equal(features.year_constraint_count, 0, "year_constraint_count");
+  expect_equal(features.covered_year_constraints, 0, "covered_year_constraints");
+  expect_equal(features.unresolved_year_constraints, 0, "unresolved_year_constraints");
+  expect_equal(features.entity_like_term_count, 1, "entity_like_term_count");
+  expect_equal(features.covered_entity_like_terms, 1, "covered_entity_like_terms");
+  expect_equal(features.unresolved_entity_like_terms, 0, "unresolved_entity_like_terms");
+  expect_equal(features.unresolved_constraint_count, 0, "unresolved_constraint_count");
+
+  const auto uncovered_constraint_features = mobile_rag::compute_evidence_features(
+      "Which SQLite metadata records 2024?",
+      ranked_results,
+      {"SQLite metadata records retrieval traces."});
+  expect_equal(uncovered_constraint_features.numeric_constraint_count, 1,
+               "uncovered numeric_constraint_count");
+  expect_equal(uncovered_constraint_features.covered_numeric_constraints, 0,
+               "uncovered covered_numeric_constraints");
+  expect_equal(uncovered_constraint_features.unresolved_numeric_constraints, 1,
+               "uncovered unresolved_numeric_constraints");
+  expect_equal(uncovered_constraint_features.year_constraint_count, 1,
+               "uncovered year_constraint_count");
+  expect_equal(uncovered_constraint_features.covered_year_constraints, 0,
+               "uncovered covered_year_constraints");
+  expect_equal(uncovered_constraint_features.unresolved_year_constraints, 1,
+               "uncovered unresolved_year_constraints");
+  expect_equal(uncovered_constraint_features.entity_like_term_count, 1,
+               "uncovered entity_like_term_count");
+  expect_equal(uncovered_constraint_features.covered_entity_like_terms, 1,
+               "uncovered covered_entity_like_terms");
+  expect_equal(uncovered_constraint_features.unresolved_entity_like_terms, 0,
+               "uncovered unresolved_entity_like_terms");
+  expect_equal(uncovered_constraint_features.unresolved_constraint_count, 1,
+               "uncovered unresolved_constraint_count");
 
   std::cout << "EvidenceFeatures test passed\n";
   return 0;

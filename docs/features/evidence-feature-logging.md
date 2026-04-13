@@ -16,6 +16,10 @@ Phase 3 in `AGENTS.md` calls for evidence sufficiency features before introducin
   - covered query term count
   - coverage ratio
   - retrieved chunk count
+  - numeric constraint count / covered count / unresolved count
+  - year-like constraint count / covered count / unresolved count
+  - entity-like term count / covered count / unresolved count
+  - total unresolved constraint count used as a controller-facing sufficiency signal
 - A focused regression test validates the feature calculations on a deterministic example.
 
 ## Key implementation points
@@ -23,6 +27,8 @@ Phase 3 in `AGENTS.md` calls for evidence sufficiency features before introducin
 - `include/controller/EvidenceFeatures.hpp` defines the feature struct and extraction entry point.
 - `src/controller/EvidenceFeatures.cpp` implements the current heuristic extractor.
 - The extractor intentionally ignores a small set of common question words and stopwords so coverage focuses more on evidence-bearing content terms.
+- Numeric constraints and year-like constraints are tracked separately from generic lexical coverage.
+- Entity-like terms are currently identified heuristically from capitalized query tokens after stopword filtering.
 - `src/RAGPipeline.cpp` now logs the computed feature vector under an `[EVIDENCE]` line.
 
 ## Main files / modules touched
@@ -66,6 +72,10 @@ None.
   - `query_terms`
   - `covered_terms`
   - `coverage_ratio`
+  - `unresolved_constraints`
+  - `unresolved_numeric`
+  - `unresolved_year`
+  - `unresolved_entity_terms`
   - `retrieved_chunks`
 
 ## How to test / reproduce
@@ -81,6 +91,7 @@ None.
 ## Known limitations / TODOs
 
 - The current feature set is heuristic and intentionally small.
-- There is no controller yet that consumes these features.
-- Term coverage is lexical only; it does not yet measure citation span availability or structured evidence slots.
+- The controller now consumes only a subset of these features; there is still no learned evidence policy.
+- The controller now consumes unresolved-constraint signals, but the feature set still does not measure citation span availability or structured evidence slots.
 - Stopword filtering is intentionally minimal and not a full linguistic normalization pipeline.
+- Entity-like term detection is heuristic and currently based only on capitalization patterns in the raw query text.

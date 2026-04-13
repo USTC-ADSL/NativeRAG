@@ -16,6 +16,16 @@ struct EvidenceFeatures {
   int query_term_count = 0;
   int covered_query_terms = 0;
   float coverage_ratio = 0.0f;
+  int numeric_constraint_count = 0;
+  int covered_numeric_constraints = 0;
+  int unresolved_numeric_constraints = 0;
+  int year_constraint_count = 0;
+  int covered_year_constraints = 0;
+  int unresolved_year_constraints = 0;
+  int entity_like_term_count = 0;
+  int covered_entity_like_terms = 0;
+  int unresolved_entity_like_terms = 0;
+  int unresolved_constraint_count = 0;
 };
 
 EvidenceFeatures compute_evidence_features(

@@ -265,7 +265,17 @@ std::string serialize_query_trace_json(const RAGPipeline::QueryTrace& trace, boo
       << indent(2) << "\"retrieved_chunk_count\"" << colon << trace.evidence.retrieved_chunk_count << "," << newline
       << indent(2) << "\"query_term_count\"" << colon << trace.evidence.query_term_count << "," << newline
       << indent(2) << "\"covered_query_terms\"" << colon << trace.evidence.covered_query_terms << "," << newline
-      << indent(2) << "\"coverage_ratio\"" << colon << trace.evidence.coverage_ratio << newline
+      << indent(2) << "\"coverage_ratio\"" << colon << trace.evidence.coverage_ratio << "," << newline
+      << indent(2) << "\"numeric_constraint_count\"" << colon << trace.evidence.numeric_constraint_count << "," << newline
+      << indent(2) << "\"covered_numeric_constraints\"" << colon << trace.evidence.covered_numeric_constraints << "," << newline
+      << indent(2) << "\"unresolved_numeric_constraints\"" << colon << trace.evidence.unresolved_numeric_constraints << "," << newline
+      << indent(2) << "\"year_constraint_count\"" << colon << trace.evidence.year_constraint_count << "," << newline
+      << indent(2) << "\"covered_year_constraints\"" << colon << trace.evidence.covered_year_constraints << "," << newline
+      << indent(2) << "\"unresolved_year_constraints\"" << colon << trace.evidence.unresolved_year_constraints << "," << newline
+      << indent(2) << "\"entity_like_term_count\"" << colon << trace.evidence.entity_like_term_count << "," << newline
+      << indent(2) << "\"covered_entity_like_terms\"" << colon << trace.evidence.covered_entity_like_terms << "," << newline
+      << indent(2) << "\"unresolved_entity_like_terms\"" << colon << trace.evidence.unresolved_entity_like_terms << "," << newline
+      << indent(2) << "\"unresolved_constraint_count\"" << colon << trace.evidence.unresolved_constraint_count << newline
       << indent(1) << "}," << newline
       << indent(1) << "\"results\"" << colon << "[";
 
@@ -406,6 +416,11 @@ bool RAGPipeline::append_last_query_trace_summary_csv(const std::string& output_
         << "fallback_reason,promoted_to_hot,demoted_to_warm,hot,warm,cold,"
         << "transition_count,top_score,second_score,score_margin,score_sharpness,"
         << "retrieved_chunk_count,query_term_count,covered_query_terms,coverage_ratio,"
+        << "numeric_constraint_count,covered_numeric_constraints,"
+        << "unresolved_numeric_constraints,year_constraint_count,"
+        << "covered_year_constraints,unresolved_year_constraints,"
+        << "entity_like_term_count,covered_entity_like_terms,"
+        << "unresolved_entity_like_terms,unresolved_constraint_count,"
         << "query_embedding_ms,retrieval_ms,evidence_ms,state_update_ms,prompt_build_ms,"
         << "generation_ms,total_ms,peak_rss_kb,llm_backend,embedding_backend,query_source,"
         << "num_threads,max_new_tokens,sqlite_db_size_bytes,index_size_bytes,"
@@ -449,6 +464,16 @@ bool RAGPipeline::append_last_query_trace_summary_csv(const std::string& output_
       << last_query_trace_.evidence.query_term_count << ","
       << last_query_trace_.evidence.covered_query_terms << ","
       << last_query_trace_.evidence.coverage_ratio << ","
+      << last_query_trace_.evidence.numeric_constraint_count << ","
+      << last_query_trace_.evidence.covered_numeric_constraints << ","
+      << last_query_trace_.evidence.unresolved_numeric_constraints << ","
+      << last_query_trace_.evidence.year_constraint_count << ","
+      << last_query_trace_.evidence.covered_year_constraints << ","
+      << last_query_trace_.evidence.unresolved_year_constraints << ","
+      << last_query_trace_.evidence.entity_like_term_count << ","
+      << last_query_trace_.evidence.covered_entity_like_terms << ","
+      << last_query_trace_.evidence.unresolved_entity_like_terms << ","
+      << last_query_trace_.evidence.unresolved_constraint_count << ","
       << last_query_trace_.timing.query_embedding_ms << ","
       << last_query_trace_.timing.retrieval_ms << ","
       << last_query_trace_.timing.evidence_ms << ","
@@ -923,6 +948,10 @@ std::string RAGPipeline::answer_query(const std::string& query) {
             << " query_terms=" << evidence_features.query_term_count
             << " covered_terms=" << evidence_features.covered_query_terms
             << " coverage_ratio=" << evidence_features.coverage_ratio
+            << " unresolved_constraints=" << evidence_features.unresolved_constraint_count
+            << " unresolved_numeric=" << evidence_features.unresolved_numeric_constraints
+            << " unresolved_year=" << evidence_features.unresolved_year_constraints
+            << " unresolved_entity_terms=" << evidence_features.unresolved_entity_like_terms
             << " retrieved_chunks=" << evidence_features.retrieved_chunk_count
             << '\n';
 

@@ -23,6 +23,7 @@ This keeps the paper story intact:
   - `balanced`
   - `relaxed`
 - When evidence looks weak after the first retrieval pass, the controller can upgrade to a richer graph and rerun retrieval before prompt construction.
+- When lexical coverage looks strong but constraint-like query tokens remain uncovered, the controller can still escalate instead of treating the evidence as sufficient.
 - Query traces now emit `[CONTROLLER]` lines alongside the existing `[RETRIEVAL]` and `[EVIDENCE]` logs.
 - The old manual prefilter flags still work exactly as before when `--adaptive-graph` is not enabled.
 
@@ -34,6 +35,7 @@ This keeps the paper story intact:
   - under a tight shortlist budget, numeric queries stay on `lexical_prefilter` instead of paying for the merged graph
   - term-rich queries prefer `lexical_prefilter`
   - short content-bearing queries prefer `semantic_hash_prefilter`
+  - unresolved numeric or entity-like query constraints can force a richer graph even when score margin and lexical coverage look acceptable
   - low evidence can trigger an upgrade to a richer graph
   - under a tight shortlist budget, evidence-based upgrades are skipped
 - `RAGPipeline::answer_query(...)` now:
@@ -75,7 +77,7 @@ This keeps the paper story intact:
    - semantic-hash shortlist + dense rerank
    - merged lexical/hash shortlist + dense rerank
 5. `RAGPipeline` computes evidence features from the first retrieval pass.
-6. If evidence is weak and a richer graph exists, the controller upgrades the graph and reruns retrieval.
+6. If evidence is weak, or if uncovered constraints remain in the retrieved evidence, and a richer graph exists, the controller upgrades the graph and reruns retrieval.
 7. The final retrieval result is logged and forwarded to prompt construction and generation.
 
 ## Config flags / thresholds / defaults
@@ -135,3 +137,4 @@ This patch only changes query-time graph selection and logging. It does not chan
 - Evidence-based upgrading is single-step only; there is no multi-hop escalation chain yet.
 - Thresholds are fixed in code.
 - The final rerank still uses the existing dense rerank implementation; this patch does not change the inner xPU placement logic.
+- Constraint detection is heuristic and currently limited to numeric, year-like, and entity-like lexical signals.
