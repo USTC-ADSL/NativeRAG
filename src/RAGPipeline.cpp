@@ -353,14 +353,25 @@ std::string RAGPipeline::answer_query(const std::string& query) {
   availability.sqlite_available = sqlite_db_ != nullptr;
   availability.lexical_graph_available = lexical_prefilter_.enabled;
   availability.semantic_hash_graph_available = semantic_hash_prefilter_.enabled;
+  GraphSelector::BudgetContext budget_context;
+  budget_context.top_k = top_k_;
+  budget_context.lexical_candidate_limit = lexical_prefilter_.enabled
+                                               ? lexical_prefilter_.candidate_limit
+                                               : 0;
+  budget_context.semantic_hash_candidate_limit = semantic_hash_prefilter_.enabled
+                                                     ? semantic_hash_prefilter_.candidate_limit
+                                                     : 0;
+  const auto budget_class = graph_selector_.classify_budget(availability, budget_context);
 
   RetrievalGraph active_graph =
       graph_from_prefilter_flags(lexical_prefilter_.enabled, semantic_hash_prefilter_.enabled);
   if (graph_selector_.config().enabled) {
-    const auto initial_decision = graph_selector_.choose_initial_graph(query, availability);
+    const auto initial_decision =
+        graph_selector_.choose_initial_graph(query, availability, budget_context);
     active_graph = initial_decision.graph;
     std::cout << "[CONTROLLER] adaptive=on initial_graph="
               << retrieval_graph_name(active_graph)
+              << " budget=" << budget_class_name(budget_class)
               << " reason=" << initial_decision.reason << '\n';
   }
 
@@ -458,11 +469,13 @@ std::string RAGPipeline::answer_query(const std::string& query) {
   std::string final_controller_reason = "adaptive_disabled";
   if (graph_selector_.config().enabled) {
     const auto escalation =
-        graph_selector_.maybe_escalate(active_graph, availability, evidence_features);
+        graph_selector_.maybe_escalate(
+            active_graph, availability, budget_context, evidence_features);
     final_controller_reason = escalation.reason;
     if (escalation.escalated && escalation.graph != active_graph) {
       std::cout << "[CONTROLLER] escalate_from=" << retrieval_graph_name(active_graph)
                 << " to=" << retrieval_graph_name(escalation.graph)
+                << " budget=" << budget_class_name(budget_class)
                 << " reason=" << escalation.reason
                 << " coverage_ratio=" << std::fixed << std::setprecision(4)
                 << evidence_features.coverage_ratio
@@ -474,6 +487,7 @@ std::string RAGPipeline::answer_query(const std::string& query) {
           compute_evidence_features(query, execution.results, retrieved_chunks);
     }
     std::cout << "[CONTROLLER] final_graph=" << retrieval_graph_name(active_graph)
+              << " budget=" << budget_class_name(budget_class)
               << " reason=" << final_controller_reason << '\n';
   }
 

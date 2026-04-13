@@ -18,6 +18,10 @@ This keeps the paper story intact:
   - `lexical_prefilter`
   - `semantic_hash_prefilter`
   - `lexical_hash_prefilter`
+- The controller now also derives a cheap retrieval-budget proxy from existing shortlist knobs and `top-k`:
+  - `tight`
+  - `balanced`
+  - `relaxed`
 - When evidence looks weak after the first retrieval pass, the controller can upgrade to a richer graph and rerun retrieval before prompt construction.
 - Query traces now emit `[CONTROLLER]` lines alongside the existing `[RETRIEVAL]` and `[EVIDENCE]` logs.
 - The old manual prefilter flags still work exactly as before when `--adaptive-graph` is not enabled.
@@ -27,11 +31,14 @@ This keeps the paper story intact:
 - `include/controller/GraphSelector.hpp` and `src/controller/GraphSelector.cpp` define the explicit outer-controller module.
 - The current policy is heuristic, not learned:
   - numeric queries prefer `lexical_hash_prefilter` when both shortlists are available
+  - under a tight shortlist budget, numeric queries stay on `lexical_prefilter` instead of paying for the merged graph
   - term-rich queries prefer `lexical_prefilter`
   - short content-bearing queries prefer `semantic_hash_prefilter`
   - low evidence can trigger an upgrade to a richer graph
+  - under a tight shortlist budget, evidence-based upgrades are skipped
 - `RAGPipeline::answer_query(...)` now:
   - asks `GraphSelector` for the initial graph
+  - derives a budget class from currently enabled shortlist sizes and `top-k`
   - executes the selected graph
   - computes evidence features
   - optionally upgrades the graph and reruns retrieval
@@ -60,6 +67,7 @@ This keeps the paper story intact:
    - the retrieval path remains the existing manual baseline chosen by prefilter flags
 3. If `--adaptive-graph` is enabled:
    - `GraphSelector` derives simple query features from the query text
+   - `GraphSelector` derives a retrieval-budget class from `top-k`, `lexical_candidate_limit`, and `semantic_hash_candidate_limit`
    - the controller picks the cheapest currently available graph
 4. `RAGPipeline` executes the selected graph:
    - dense only
@@ -79,6 +87,8 @@ This keeps the paper story intact:
   - lexical-rich query threshold: `3` content terms
   - weak-evidence score margin threshold: `0.15`
   - weak-evidence coverage threshold: `0.50`
+  - tight shortlist budget threshold: `2 * top_k`
+  - balanced shortlist budget threshold: `4 * top_k`
 - These thresholds are intentionally still code defaults and are not yet exposed as CLI knobs.
 
 ## Fallback behavior
@@ -99,6 +109,7 @@ This patch only changes query-time graph selection and logging. It does not chan
 
 - Adds query-time `[CONTROLLER]` logs for:
   - initial graph
+  - derived budget class
   - selection reason
   - escalation source and destination when triggered
   - final graph
@@ -114,12 +125,13 @@ This patch only changes query-time graph selection and logging. It does not chan
    - `ctest --test-dir build_progress_check -R 'GraphSelectorTest|CommandLineArgsTest|RAGSemanticHashPrefilterTest|EvidenceFeaturesTest' --output-on-failure`
 4. Run a query with both prefilters and adaptive mode enabled:
    - expect `[CONTROLLER]` logs before `[RETRIEVAL]`
+   - expect a `budget=tight|balanced|relaxed` field in the controller logs
    - expect the final retrieval graph to remain one of the existing baseline graphs
 
 ## Known limitations / TODOs
 
 - The current controller is heuristic and uses only simple query/evidence features.
-- Budget signals are still proxy signals; there is no thermal or energy-aware policy yet.
+- Budget signals are still shortlist-size proxies; there is no thermal or energy-aware policy yet.
 - Evidence-based upgrading is single-step only; there is no multi-hop escalation chain yet.
 - Thresholds are fixed in code.
 - The final rerank still uses the existing dense rerank implementation; this patch does not change the inner xPU placement logic.

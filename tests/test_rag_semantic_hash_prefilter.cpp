@@ -254,6 +254,7 @@ void test_adaptive_graph_logs_controller_selection() {
   assert(run.answer.find("SQLite stores metadata and traces for this project.") !=
          std::string::npos);
   assert(run.stdout_text.find("[CONTROLLER]") != std::string::npos);
+  assert(run.stdout_text.find("budget=tight") != std::string::npos);
   assert(run.stdout_text.find("initial_graph=lexical_prefilter") != std::string::npos);
   assert(run.stdout_text.find("reason=term_rich_query") != std::string::npos);
 

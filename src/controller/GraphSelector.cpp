@@ -74,6 +74,18 @@ const char* retrieval_graph_name(RetrievalGraph graph) {
   return "unknown";
 }
 
+const char* budget_class_name(BudgetClass budget_class) {
+  switch (budget_class) {
+    case BudgetClass::TIGHT:
+      return "tight";
+    case BudgetClass::BALANCED:
+      return "balanced";
+    case BudgetClass::RELAXED:
+      return "relaxed";
+  }
+  return "unknown";
+}
+
 GraphSelector::GraphSelector() {
   set_config(Config{});
 }
@@ -86,12 +98,37 @@ void GraphSelector::set_config(Config config) {
   config.lexical_query_term_threshold = std::max(1, config.lexical_query_term_threshold);
   config.min_score_margin = std::max(0.0f, config.min_score_margin);
   config.min_coverage_ratio = std::max(0.0f, std::min(1.0f, config.min_coverage_ratio));
+  config.tight_budget_shortlist_factor = std::max(1, config.tight_budget_shortlist_factor);
+  config.balanced_budget_shortlist_factor = std::max(
+      config.tight_budget_shortlist_factor + 1, config.balanced_budget_shortlist_factor);
   config_ = config;
+}
+
+BudgetClass GraphSelector::classify_budget(const Availability& availability,
+                                           const BudgetContext& budget) const {
+  const int safe_top_k = std::max(1, budget.top_k);
+
+  int shortlist_budget = 0;
+  if (lexical_available(availability)) {
+    shortlist_budget += std::max(0, budget.lexical_candidate_limit);
+  }
+  if (semantic_available(availability)) {
+    shortlist_budget += std::max(0, budget.semantic_hash_candidate_limit);
+  }
+
+  if (shortlist_budget <= safe_top_k * config_.tight_budget_shortlist_factor) {
+    return BudgetClass::TIGHT;
+  }
+  if (shortlist_budget <= safe_top_k * config_.balanced_budget_shortlist_factor) {
+    return BudgetClass::BALANCED;
+  }
+  return BudgetClass::RELAXED;
 }
 
 GraphSelector::Decision GraphSelector::choose_initial_graph(
     const std::string& query,
-    const Availability& availability) const {
+    const Availability& availability,
+    const BudgetContext& budget) const {
   if (!config_.enabled) {
     return {RetrievalGraph::DENSE_ONLY, "adaptive_disabled", false};
   }
@@ -100,6 +137,7 @@ GraphSelector::Decision GraphSelector::choose_initial_graph(
   const bool semantic = semantic_available(availability);
   const int query_term_count = static_cast<int>(tokenize_terms(query).size());
   const bool numeric_query = has_numeric_token(query);
+  const auto budget_class = classify_budget(availability, budget);
 
   if (!lexical && !semantic) {
     return {RetrievalGraph::DENSE_ONLY,
@@ -109,6 +147,9 @@ GraphSelector::Decision GraphSelector::choose_initial_graph(
 
   if (lexical && semantic) {
     if (numeric_query) {
+      if (budget_class == BudgetClass::TIGHT) {
+        return {RetrievalGraph::LEXICAL_PREFILTER, "numeric_query_budget_limited", false};
+      }
       return {RetrievalGraph::LEXICAL_HASH_PREFILTER, "numeric_query", false};
     }
     if (query_term_count >= config_.lexical_query_term_threshold) {
@@ -137,6 +178,7 @@ GraphSelector::Decision GraphSelector::choose_initial_graph(
 GraphSelector::Decision GraphSelector::maybe_escalate(
     RetrievalGraph current_graph,
     const Availability& availability,
+    const BudgetContext& budget,
     const EvidenceFeatures& evidence) const {
   if (!config_.enabled) {
     return {current_graph, "adaptive_disabled", false};
@@ -152,6 +194,10 @@ GraphSelector::Decision GraphSelector::maybe_escalate(
       evidence.score_margin < config_.min_score_margin;
   if (!weak_evidence) {
     return {current_graph, "evidence_sufficient", false};
+  }
+
+  if (classify_budget(availability, budget) == BudgetClass::TIGHT) {
+    return {current_graph, "budget_limited", false};
   }
 
   const bool lexical = lexical_available(availability);
