@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 
 import json
-import os
 import stat
 import subprocess
 import sys
@@ -96,6 +95,66 @@ Path(batch_report).write_text(json.dumps({
         "peak_rss_kb": metrics["peak_rss_kb"]
     }
 }, indent=2), encoding="utf-8")
+"""
+    write_text(path, script)
+    path.chmod(path.stat().st_mode | stat.S_IEXEC)
+
+
+def write_fake_adb(path: Path, device_root: Path) -> None:
+    script = f"""#!/usr/bin/env python3
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+
+DEVICE_ROOT = Path({device_root.as_posix()!r})
+
+
+def to_local(remote_path):
+    return DEVICE_ROOT / remote_path.lstrip("/")
+
+
+args = sys.argv[1:]
+if args[:1] == ["-s"]:
+    args = args[2:]
+
+if args == ["devices"]:
+    sys.stdout.write("List of devices attached\\nfd8657d6\\tdevice\\n")
+    sys.exit(0)
+
+if args == ["get-state"]:
+    sys.stdout.write("device\\n")
+    sys.exit(0)
+
+if not args:
+    sys.exit(1)
+
+if args[0] == "shell":
+    shell_args = args[1:]
+    if shell_args[:2] == ["mkdir", "-p"]:
+        to_local(shell_args[2]).mkdir(parents=True, exist_ok=True)
+        sys.exit(0)
+    translated = []
+    for token in shell_args:
+        if token.startswith("/"):
+            translated.append(str(to_local(token)))
+        else:
+            translated.append(token)
+    result = subprocess.run(translated, text=True, capture_output=True, check=False)
+    sys.stdout.write(result.stdout)
+    sys.stderr.write(result.stderr)
+    sys.exit(result.returncode)
+
+if args[0] == "pull":
+    source = to_local(args[1])
+    destination = Path(args[2])
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(source, destination)
+    sys.stdout.write(f"{{args[1]}}: 1 file pulled\\n")
+    sys.exit(0)
+
+sys.exit(1)
 """
     write_text(path, script)
     path.chmod(path.stat().st_mode | stat.S_IEXEC)
@@ -247,11 +306,74 @@ def test_replays_manifest_into_new_output_dir(temp_root: Path) -> None:
     assert (replay_output_dir / "runs" / "03_adaptive_graph" / "batch-report.json").exists()
 
 
+def test_runs_matrix_via_fake_adb_device(temp_root: Path) -> None:
+    device_root = temp_root / "device_root"
+    remote_binary = device_root / "remote" / "bin" / "mobile_rag_cli"
+    write_fake_cli(remote_binary)
+
+    remote_query_file = device_root / "remote" / "input" / "queries.txt"
+    write_text(remote_query_file, "what is sqlite?\nwhat is faiss?\n")
+
+    for remote_path in (
+        device_root / "remote" / "models" / "fake.gguf",
+        device_root / "remote" / "models" / "embedding-config.json",
+        device_root / "remote" / "runtime" / "rag.sqlite3",
+        device_root / "remote" / "runtime" / "rag.faiss",
+        device_root / "remote" / "runtime" / "state.snapshot.tsv",
+    ):
+        write_text(remote_path, "stub\n")
+
+    fake_adb = temp_root / "fake_adb.py"
+    write_fake_adb(fake_adb, device_root)
+
+    output_dir = temp_root / "device_benchmark"
+    result = run_command(
+        [
+            sys.executable,
+            str(RUNNER),
+            "--adb",
+            str(fake_adb),
+            "--adb-serial",
+            "fd8657d6",
+            "--remote-workdir",
+            "/remote/bench",
+            "--binary",
+            "/remote/bin/mobile_rag_cli",
+            "--query-file",
+            "/remote/input/queries.txt",
+            "--llm-model",
+            "/remote/models/fake.gguf",
+            "--embedding-model",
+            "/remote/models/embedding-config.json",
+            "--sqlite-db",
+            "/remote/runtime/rag.sqlite3",
+            "--index-path",
+            "/remote/runtime/rag.faiss",
+            "--state-snapshot-in",
+            "/remote/runtime/state.snapshot.tsv",
+            "--output-dir",
+            str(output_dir),
+        ],
+        cwd=REPO_ROOT,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+
+    summary_json = json.loads((output_dir / "summary.json").read_text(encoding="utf-8"))
+    assert summary_json["run_count"] == 3
+    assert (output_dir / "runs" / "01_dense_only" / "batch-report.json").exists()
+
+    manifest = json.loads((output_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["shared_config"]["execution_mode"] == "adb"
+    assert manifest["shared_config"]["adb_serial"] == "fd8657d6"
+    assert manifest["shared_config"]["remote_workdir"] == "/remote/bench"
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory(prefix="native_rag_benchmark_runner_") as temp_dir:
         temp_root = Path(temp_dir)
         test_runs_matrix_and_writes_manifest(temp_root / "case1")
         test_replays_manifest_into_new_output_dir(temp_root / "case2")
+        test_runs_matrix_via_fake_adb_device(temp_root / "case3")
     print("Benchmark runner test passed")
     return 0
 

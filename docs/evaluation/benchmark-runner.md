@@ -30,12 +30,16 @@ This patch adds a small outer-loop benchmark runner that drives those existing e
 ## Key implementation points
 
 - The runner lives outside the native runtime and shells out to the existing CLI binary.
+- The runner supports two execution modes:
+  - local host execution against a local CLI binary
+  - device execution through `adb`, with artifact pull-back into the local output directory
 - Preset selection is explicit and maps to existing query-time flags:
   - `dense_only`: no retrieval prefilter flags
   - `static_tiered`: `--lexical-prefilter --semantic-hash-prefilter`
   - `adaptive_graph`: `--lexical-prefilter --semantic-hash-prefilter --adaptive-graph`
 - Each run reuses the same shared query/model/index inputs, which keeps baseline comparisons aligned.
 - If `--state-snapshot-in` is provided, the same input snapshot is reused for every preset so replay and ablation runs start from the same saved state.
+- In device mode the runner first checks `adb devices`, requires the selected serial to be in `device` state, runs the remote CLI once per preset, and pulls the generated artifacts back before summarizing them.
 - Replay mode reads `manifest.json`, reconstructs the shared inputs plus preset list, and reruns the matrix into a fresh output directory.
 - Focused smoke coverage lives in `tests/test_benchmark_runner.py`; it uses a fake CLI binary so the test stays fast and deterministic.
 
@@ -53,6 +57,7 @@ This patch adds a small outer-loop benchmark runner that drives those existing e
 3. For each preset:
    - it creates `runs/<NN>_<preset>/`
    - it invokes `mobile_rag_cli --query --query-file ...` with the preset flags
+   - in device mode it also creates the remote run directory and then pulls the produced artifacts back locally
    - it captures stdout / stderr into log files
    - it reads the preset's batch report JSON to extract top-level metrics
 4. After all runs finish, the runner writes:
@@ -73,6 +78,12 @@ This patch adds a small outer-loop benchmark runner that drives those existing e
   - `--output-dir <path>`
 - Optional fresh-run flags:
   - `--state-snapshot-in <path>`
+  - `--adb <path>`
+    - optional adb executable override; defaults to `adb`
+  - `--adb-serial <serial>`
+    - enables device mode instead of local execution
+  - `--remote-workdir <path>`
+    - required in device mode; remote directory used for per-run outputs
   - `--preset <name>` repeated; default is `dense_only`, `static_tiered`, `adaptive_graph`
   - `--top-k <num>`
   - `--threads <num>`
@@ -113,9 +124,11 @@ The runner writes evaluation artifacts beside existing JSONL / CSV / snapshot ou
   - per-run artifact paths
 - `manifest.json` adds:
   - shared query/model/index config
+  - execution mode and adb metadata when applicable
   - preset list
   - exact commands executed
   - relative artifact paths for each run
+  - remote artifact paths for each run in device mode
 - Each preset bundle now also saves:
   - `stdout.log`
   - `stderr.log`
@@ -137,10 +150,12 @@ The runner writes evaluation artifacts beside existing JSONL / CSV / snapshot ou
    - `/tmp/native_rag_bench/runs/03_adaptive_graph/`
 5. Replay the same matrix:
    - `python3 tools/run_benchmark_matrix.py --replay-manifest /tmp/native_rag_bench/manifest.json --output-dir /tmp/native_rag_bench_replay`
+6. Run the matrix on the default device serial when the inputs are already deployed remotely:
+   - `python3 tools/run_benchmark_matrix.py --adb-serial fd8657d6 --remote-workdir /data/local/tmp/nativerag-bench --binary /data/local/tmp/nativerag-check/mobile_rag_cli --query-file /data/local/tmp/nativerag-check/runtime/query_batch.txt --llm-model /data/local/tmp/nativerag-check/models/Qwen3-4B-Q8_0.gguf --embedding-model /data/local/tmp/nativerag-check/models/Qwen3-0.6B-Embedding/config.json --sqlite-db /data/local/tmp/nativerag-check/runtime/state_demote.sqlite3 --index-path /data/local/tmp/nativerag-check/runtime/state_demote.faiss --state-snapshot-in /data/local/tmp/nativerag-check/runtime/state_demote_hot2.snapshot.tsv --output-dir /tmp/native_rag_bench_device`
 
 ## Known limitations / TODOs
 
-- The runner currently automates the preset matrix on the host side; it does not yet wrap `adb -s fd8657d6` device execution.
 - Replay currently reuses the saved shared configuration and preset list, but it does not diff new artifacts against the original manifest.
+- Device mode assumes the CLI binary, query file, models, and index inputs are already present on the target device; it does not push them automatically.
 - The summary only surfaces metrics already present in per-run batch reports; it does not compute deeper citation metrics itself.
 - Presets are fixed and heuristic for now; there is no external experiment spec file yet.

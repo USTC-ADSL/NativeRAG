@@ -8,7 +8,7 @@ import json
 import subprocess
 import sys
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Dict, Iterable, List
 
 
@@ -38,6 +38,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--index-path", help="Path to the Faiss index")
     parser.add_argument("--state-snapshot-in", help="Optional chunk-state snapshot input")
     parser.add_argument(
+        "--adb",
+        default="adb",
+        help="ADB executable for device-mode runs (default: adb)",
+    )
+    parser.add_argument(
+        "--adb-serial",
+        help="If set, run the matrix on this device via adb instead of locally",
+    )
+    parser.add_argument(
+        "--remote-workdir",
+        help="Remote device output root used when --adb-serial is enabled",
+    )
+    parser.add_argument(
         "--output-dir",
         required=True,
         help="Directory that will receive run bundles, summaries, and the manifest",
@@ -63,6 +76,12 @@ def parse_args() -> argparse.Namespace:
 
 def fail(message: str) -> "NoReturn":
     raise SystemExit(message)
+
+
+def ensure_nonempty(value: str | None, label: str) -> str:
+    if not value:
+        fail(f"Error: {label} is required")
+    return value
 
 
 def ensure_path_exists(path_str: str, label: str) -> str:
@@ -98,15 +117,18 @@ def normalize_presets(presets: Iterable[str] | None) -> List[str]:
     return normalized
 
 
+def resolve_command_path(command: str | None) -> str:
+    value = ensure_nonempty(command, "command")
+    path = Path(value)
+    if path.exists():
+        return str(path.resolve())
+    return value
+
+
 def build_shared_config(args: argparse.Namespace) -> dict:
-    return {
-        "binary": ensure_path_exists(args.binary, "--binary"),
-        "query_file": ensure_path_exists(args.query_file, "--query-file"),
-        "llm_model": ensure_path_exists(args.llm_model, "--llm-model"),
-        "embedding_model": ensure_path_exists(args.embedding_model, "--embedding-model"),
-        "sqlite_db": ensure_path_exists(args.sqlite_db, "--sqlite-db"),
-        "index_path": ensure_path_exists(args.index_path, "--index-path"),
-        "state_snapshot_in": resolve_optional_path(args.state_snapshot_in),
+    execution_mode = "adb" if args.adb_serial else "local"
+    shared_config = {
+        "execution_mode": execution_mode,
         "top_k": args.top_k,
         "threads": args.threads,
         "max_new_tokens": args.max_new_tokens,
@@ -115,14 +137,81 @@ def build_shared_config(args: argparse.Namespace) -> dict:
         "semantic_hash_max_distance": args.semantic_hash_max_distance,
         "presets": normalize_presets(args.presets),
     }
+    if execution_mode == "adb":
+        shared_config.update(
+            {
+                "adb": resolve_command_path(args.adb),
+                "adb_serial": ensure_nonempty(args.adb_serial, "--adb-serial"),
+                "remote_workdir": ensure_nonempty(args.remote_workdir, "--remote-workdir"),
+                "binary": ensure_nonempty(args.binary, "--binary"),
+                "query_file": ensure_nonempty(args.query_file, "--query-file"),
+                "llm_model": ensure_nonempty(args.llm_model, "--llm-model"),
+                "embedding_model": ensure_nonempty(args.embedding_model, "--embedding-model"),
+                "sqlite_db": ensure_nonempty(args.sqlite_db, "--sqlite-db"),
+                "index_path": ensure_nonempty(args.index_path, "--index-path"),
+                "state_snapshot_in": args.state_snapshot_in or "",
+            }
+        )
+        return shared_config
+
+    shared_config.update(
+        {
+            "adb": "",
+            "adb_serial": "",
+            "remote_workdir": "",
+            "binary": ensure_path_exists(args.binary, "--binary"),
+            "query_file": ensure_path_exists(args.query_file, "--query-file"),
+            "llm_model": ensure_path_exists(args.llm_model, "--llm-model"),
+            "embedding_model": ensure_path_exists(args.embedding_model, "--embedding-model"),
+            "sqlite_db": ensure_path_exists(args.sqlite_db, "--sqlite-db"),
+            "index_path": ensure_path_exists(args.index_path, "--index-path"),
+            "state_snapshot_in": resolve_optional_path(args.state_snapshot_in),
+        }
+    )
+    return shared_config
 
 
-def load_shared_config_from_manifest(manifest_path: Path, binary_override: str | None) -> dict:
+def load_shared_config_from_manifest(
+    manifest_path: Path,
+    binary_override: str | None,
+    adb_override: str | None,
+) -> dict:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if manifest.get("schema_version") != 1:
         fail(f"Error: unsupported manifest schema version in {manifest_path}")
     shared_config = dict(manifest["shared_config"])
     shared_config["presets"] = normalize_presets(shared_config.get("presets"))
+    execution_mode = shared_config.get("execution_mode", "local")
+    if execution_mode == "adb":
+        if binary_override:
+            shared_config["binary"] = ensure_nonempty(binary_override, "--binary")
+        else:
+            shared_config["binary"] = ensure_nonempty(shared_config.get("binary"), "manifest binary")
+        shared_config["adb"] = resolve_command_path(adb_override or shared_config.get("adb") or "adb")
+        shared_config["adb_serial"] = ensure_nonempty(
+            shared_config.get("adb_serial"), "manifest adb_serial"
+        )
+        shared_config["remote_workdir"] = ensure_nonempty(
+            shared_config.get("remote_workdir"), "manifest remote_workdir"
+        )
+        shared_config["query_file"] = ensure_nonempty(
+            shared_config.get("query_file"), "manifest query_file"
+        )
+        shared_config["llm_model"] = ensure_nonempty(
+            shared_config.get("llm_model"), "manifest llm_model"
+        )
+        shared_config["embedding_model"] = ensure_nonempty(
+            shared_config.get("embedding_model"), "manifest embedding_model"
+        )
+        shared_config["sqlite_db"] = ensure_nonempty(
+            shared_config.get("sqlite_db"), "manifest sqlite_db"
+        )
+        shared_config["index_path"] = ensure_nonempty(
+            shared_config.get("index_path"), "manifest index_path"
+        )
+        shared_config["state_snapshot_in"] = shared_config.get("state_snapshot_in", "")
+        return shared_config
+
     if binary_override:
         shared_config["binary"] = ensure_path_exists(binary_override, "--binary")
     else:
@@ -135,6 +224,10 @@ def load_shared_config_from_manifest(manifest_path: Path, binary_override: str |
     shared_config["sqlite_db"] = ensure_path_exists(shared_config["sqlite_db"], "manifest sqlite_db")
     shared_config["index_path"] = ensure_path_exists(shared_config["index_path"], "manifest index_path")
     shared_config["state_snapshot_in"] = resolve_optional_path(shared_config.get("state_snapshot_in"))
+    shared_config["adb"] = ""
+    shared_config["adb_serial"] = ""
+    shared_config["remote_workdir"] = ""
+    shared_config["execution_mode"] = "local"
     return shared_config
 
 
@@ -149,7 +242,16 @@ def make_run_artifacts(run_dir: Path) -> dict:
     }
 
 
-def build_command(shared_config: dict, preset: str, artifacts: dict) -> List[str]:
+def make_remote_run_artifacts(remote_run_dir: PurePosixPath) -> dict:
+    return {
+        "trace_jsonl": str(remote_run_dir / "query-trace.jsonl"),
+        "summary_csv": str(remote_run_dir / "query-summary.csv"),
+        "batch_report": str(remote_run_dir / "batch-report.json"),
+        "state_snapshot_out": str(remote_run_dir / "state.snapshot.tsv"),
+    }
+
+
+def build_cli_command(shared_config: dict, preset: str, artifacts: dict) -> List[str]:
     command = [
         shared_config["binary"],
         "--query",
@@ -170,13 +272,13 @@ def build_command(shared_config: dict, preset: str, artifacts: dict) -> List[str
         "--max-new-tokens",
         str(shared_config["max_new_tokens"]),
         "--query-trace-jsonl-out",
-        str(artifacts["trace_jsonl"]),
+        artifacts["trace_jsonl"],
         "--query-summary-csv-out",
-        str(artifacts["summary_csv"]),
+        artifacts["summary_csv"],
         "--query-batch-report-out",
-        str(artifacts["batch_report"]),
+        artifacts["batch_report"],
         "--state-snapshot-out",
-        str(artifacts["state_snapshot_out"]),
+        artifacts["state_snapshot_out"],
     ]
     if shared_config.get("state_snapshot_in"):
         command.extend(["--state-snapshot-in", shared_config["state_snapshot_in"]])
@@ -195,10 +297,40 @@ def build_command(shared_config: dict, preset: str, artifacts: dict) -> List[str
     return command
 
 
+def run_subprocess(command: List[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(command, text=True, capture_output=True, check=False)
+
+
+def adb_base_command(shared_config: dict) -> List[str]:
+    return [shared_config["adb"], "-s", shared_config["adb_serial"]]
+
+
+def verify_device_ready(shared_config: dict) -> None:
+    if shared_config.get("execution_mode") != "adb":
+        return
+    result = run_subprocess([shared_config["adb"], "devices"])
+    if result.returncode != 0:
+        fail(f"Error: failed to query adb devices using {shared_config['adb']}")
+    expected = f"{shared_config['adb_serial']}\tdevice"
+    if expected not in result.stdout:
+        fail(
+            f"Error: device {shared_config['adb_serial']} is not in device state. "
+            "Reconnect the device before running benchmarks."
+        )
+
+
+def pull_remote_artifact(shared_config: dict, remote_path: str, local_path: Path) -> None:
+    local_path.parent.mkdir(parents=True, exist_ok=True)
+    result = run_subprocess(adb_base_command(shared_config) + ["pull", remote_path, str(local_path)])
+    if result.returncode != 0:
+        fail(f"Error: failed to pull remote artifact {remote_path} to {local_path}")
+
+
 def run_matrix(shared_config: dict, output_dir: Path) -> tuple[dict, dict]:
     output_dir.mkdir(parents=True, exist_ok=True)
     runs_dir = output_dir / "runs"
     runs_dir.mkdir(parents=True, exist_ok=True)
+    verify_device_ready(shared_config)
 
     summary_runs = []
     manifest_runs = []
@@ -206,18 +338,44 @@ def run_matrix(shared_config: dict, output_dir: Path) -> tuple[dict, dict]:
     for index, preset in enumerate(shared_config["presets"], start=1):
         run_dir = runs_dir / f"{index:02d}_{preset}"
         run_dir.mkdir(parents=True, exist_ok=True)
-        artifacts = make_run_artifacts(run_dir)
-        command = build_command(shared_config, preset, artifacts)
-        result = subprocess.run(command, text=True, capture_output=True, check=False)
-        artifacts["stdout"].write_text(result.stdout, encoding="utf-8")
-        artifacts["stderr"].write_text(result.stderr, encoding="utf-8")
+        local_artifacts = make_run_artifacts(run_dir)
+        remote_artifacts = None
+        cli_command = []
+        host_command = []
+
+        if shared_config.get("execution_mode") == "adb":
+            remote_run_dir = PurePosixPath(shared_config["remote_workdir"]) / "runs" / f"{index:02d}_{preset}"
+            remote_artifacts = make_remote_run_artifacts(remote_run_dir)
+            mkdir_result = run_subprocess(
+                adb_base_command(shared_config) + ["shell", "mkdir", "-p", str(remote_run_dir)]
+            )
+            if mkdir_result.returncode != 0:
+                fail(f"Error: failed to create remote run directory {remote_run_dir}")
+            cli_command = build_cli_command(shared_config, preset, remote_artifacts)
+            host_command = adb_base_command(shared_config) + ["shell"] + cli_command
+            result = run_subprocess(host_command)
+        else:
+            cli_command = build_cli_command(
+                shared_config,
+                preset,
+                {key: str(value) for key, value in local_artifacts.items() if key not in {"stdout", "stderr"}},
+            )
+            host_command = cli_command
+            result = run_subprocess(host_command)
+
+        local_artifacts["stdout"].write_text(result.stdout, encoding="utf-8")
+        local_artifacts["stderr"].write_text(result.stderr, encoding="utf-8")
         if result.returncode != 0:
             fail(
                 f"Error: benchmark preset '{preset}' failed with exit code {result.returncode}. "
-                f"See {artifacts['stderr']}"
+                f"See {local_artifacts['stderr']}"
             )
 
-        batch_report = json.loads(artifacts["batch_report"].read_text(encoding="utf-8"))
+        if remote_artifacts is not None:
+            for artifact_name, remote_path in remote_artifacts.items():
+                pull_remote_artifact(shared_config, remote_path, local_artifacts[artifact_name])
+
+        batch_report = json.loads(local_artifacts["batch_report"].read_text(encoding="utf-8"))
         summary_runs.append(
             {
                 "preset": preset,
@@ -232,25 +390,26 @@ def run_matrix(shared_config: dict, output_dir: Path) -> tuple[dict, dict]:
                 .get("p95", {})
                 .get("total_ms", 0.0),
                 "max_peak_rss_kb": batch_report["maxima"]["max_peak_rss_kb"],
-                "batch_report_path": artifacts["batch_report"].relative_to(output_dir).as_posix(),
-                "trace_jsonl_path": artifacts["trace_jsonl"].relative_to(output_dir).as_posix(),
-                "summary_csv_path": artifacts["summary_csv"].relative_to(output_dir).as_posix(),
-                "state_snapshot_out_path": artifacts["state_snapshot_out"]
+                "batch_report_path": local_artifacts["batch_report"].relative_to(output_dir).as_posix(),
+                "trace_jsonl_path": local_artifacts["trace_jsonl"].relative_to(output_dir).as_posix(),
+                "summary_csv_path": local_artifacts["summary_csv"].relative_to(output_dir).as_posix(),
+                "state_snapshot_out_path": local_artifacts["state_snapshot_out"]
                 .relative_to(output_dir)
                 .as_posix(),
             }
         )
-        manifest_runs.append(
-            {
-                "preset": preset,
-                "preset_flags": PRESET_FLAGS[preset],
-                "command": command,
-                "artifact_paths": {
-                    key: value.relative_to(output_dir).as_posix()
-                    for key, value in artifacts.items()
-                },
-            }
-        )
+        manifest_entry = {
+            "preset": preset,
+            "preset_flags": PRESET_FLAGS[preset],
+            "command": host_command,
+            "artifact_paths": {
+                key: value.relative_to(output_dir).as_posix()
+                for key, value in local_artifacts.items()
+            },
+        }
+        if remote_artifacts is not None:
+            manifest_entry["remote_artifact_paths"] = remote_artifacts
+        manifest_runs.append(manifest_entry)
 
     summary = {
         "schema_version": 1,
@@ -323,7 +482,7 @@ def main() -> int:
         manifest_path = Path(args.replay_manifest).resolve()
         if not manifest_path.exists():
             fail(f"Error: replay manifest not found: {manifest_path}")
-        shared_config = load_shared_config_from_manifest(manifest_path, args.binary)
+        shared_config = load_shared_config_from_manifest(manifest_path, args.binary, args.adb)
     else:
         shared_config = build_shared_config(args)
 
