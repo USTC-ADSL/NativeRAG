@@ -17,11 +17,20 @@ def write_text(path: Path, contents: str) -> None:
     path.write_text(contents, encoding="utf-8")
 
 
-def write_fake_cli(path: Path) -> None:
+def write_fake_cli(
+    path: Path,
+    require_binary_dir_in_ld_library_path: bool = False,
+    require_cwd_matches_binary_dir: bool = False,
+) -> None:
     script = """#!/usr/bin/env python3
 import json
+import os
 import sys
 from pathlib import Path
+
+
+REQUIRE_BINARY_DIR_IN_LD_LIBRARY_PATH = __REQUIRE_BINARY_DIR_IN_LD_LIBRARY_PATH__
+REQUIRE_CWD_MATCHES_BINARY_DIR = __REQUIRE_CWD_MATCHES_BINARY_DIR__
 
 
 def take_arg(flag):
@@ -29,6 +38,31 @@ def take_arg(flag):
         index = sys.argv.index(flag)
         return sys.argv[index + 1]
     return ""
+
+
+if REQUIRE_BINARY_DIR_IN_LD_LIBRARY_PATH:
+    binary_dir = str(Path(sys.argv[0]).resolve().parent)
+    library_path_entries = []
+    for entry in os.environ.get("LD_LIBRARY_PATH", "").split(":"):
+        if not entry:
+            continue
+        entry_path = Path(entry)
+        if not entry_path.is_absolute():
+            entry_path = (Path.cwd() / entry_path).resolve()
+        library_path_entries.append(str(entry_path))
+    if binary_dir not in library_path_entries:
+        sys.stderr.write(
+            f'CANNOT LINK EXECUTABLE "{{sys.argv[0]}}": library "libMNN.so" not found\\n'
+        )
+        sys.exit(1)
+
+if REQUIRE_CWD_MATCHES_BINARY_DIR:
+    binary_dir = Path(sys.argv[0]).resolve().parent
+    if Path.cwd().resolve() != binary_dir:
+        sys.stderr.write(
+            f'Expected cwd "{{Path.cwd()}}" to match binary dir "{{binary_dir}}"\\n'
+        )
+        sys.exit(1)
 
 
 query_file = take_arg("--query-file")
@@ -111,12 +145,22 @@ Path(batch_report).write_text(json.dumps({
     }
 }, indent=2), encoding="utf-8")
 """
+    script = script.replace(
+        "__REQUIRE_BINARY_DIR_IN_LD_LIBRARY_PATH__",
+        repr(require_binary_dir_in_ld_library_path),
+    )
+    script = script.replace(
+        "__REQUIRE_CWD_MATCHES_BINARY_DIR__",
+        repr(require_cwd_matches_binary_dir),
+    )
     write_text(path, script)
     path.chmod(path.stat().st_mode | stat.S_IEXEC)
 
 
 def write_fake_adb(path: Path, device_root: Path) -> None:
     script = f"""#!/usr/bin/env python3
+import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -150,9 +194,62 @@ if args[0] == "shell":
     if shell_args[:2] == ["mkdir", "-p"]:
         to_local(shell_args[2]).mkdir(parents=True, exist_ok=True)
         sys.exit(0)
+    if len(shell_args) == 1:
+        command_string = shell_args[0]
+        segments = [shlex.split(part.strip()) for part in command_string.split("&&")]
+        cwd = None
+        env = os.environ.copy()
+        translated = []
+        for segment in segments:
+            if not segment:
+                continue
+            if segment[0] == "cd":
+                target = segment[1]
+                cwd = to_local(target) if target.startswith("/") else Path(target)
+                continue
+            if segment[0] == "env":
+                command_tokens = segment[1:]
+                while command_tokens and "=" in command_tokens[0]:
+                    key, value = command_tokens.pop(0).split("=", 1)
+                    translated_paths = []
+                    for entry in value.split(":"):
+                        if entry.startswith("/"):
+                            translated_paths.append(str(to_local(entry)))
+                        else:
+                            translated_paths.append(entry)
+                    env[key] = ":".join(translated_paths)
+                translated = command_tokens
+                break
+            translated = segment
+        normalized = []
+        for token in translated:
+            if token.startswith("/"):
+                normalized.append(str(to_local(token)))
+            else:
+                normalized.append(token)
+        result = subprocess.run(
+            normalized,
+            text=True,
+            capture_output=True,
+            check=False,
+            cwd=cwd,
+            env=env,
+        )
+        sys.stdout.write(result.stdout)
+        sys.stderr.write(result.stderr)
+        sys.exit(result.returncode)
     translated = []
     for token in shell_args:
-        if token.startswith("/"):
+        if token.startswith("LD_LIBRARY_PATH="):
+            key, value = token.split("=", 1)
+            translated_paths = []
+            for entry in value.split(":"):
+                if entry.startswith("/"):
+                    translated_paths.append(str(to_local(entry)))
+                else:
+                    translated_paths.append(entry)
+            translated.append(key + "=" + ":".join(translated_paths))
+        elif token.startswith("/"):
             translated.append(str(to_local(token)))
         else:
             translated.append(token)
@@ -385,6 +482,120 @@ def test_runs_matrix_via_fake_adb_device(temp_root: Path) -> None:
     assert manifest["shared_config"]["remote_workdir"] == "/remote/bench"
 
 
+def test_runs_matrix_via_fake_adb_device_with_binary_dir_library_path(temp_root: Path) -> None:
+    device_root = temp_root / "device_root"
+    remote_binary = device_root / "remote" / "bin" / "mobile_rag_cli"
+    write_fake_cli(remote_binary, require_binary_dir_in_ld_library_path=True)
+
+    remote_query_file = device_root / "remote" / "input" / "queries.txt"
+    write_text(remote_query_file, "what is sqlite?\n")
+
+    for remote_path in (
+        device_root / "remote" / "models" / "fake.gguf",
+        device_root / "remote" / "models" / "embedding-config.json",
+        device_root / "remote" / "runtime" / "rag.sqlite3",
+        device_root / "remote" / "runtime" / "rag.faiss",
+        device_root / "remote" / "runtime" / "state.snapshot.tsv",
+    ):
+        write_text(remote_path, "stub\n")
+
+    fake_adb = temp_root / "fake_adb.py"
+    write_fake_adb(fake_adb, device_root)
+
+    output_dir = temp_root / "device_benchmark_ld_library_path"
+    result = run_command(
+        [
+            sys.executable,
+            str(RUNNER),
+            "--adb",
+            str(fake_adb),
+            "--adb-serial",
+            "fd8657d6",
+            "--remote-workdir",
+            "/remote/bench",
+            "--binary",
+            "/remote/bin/mobile_rag_cli",
+            "--query-file",
+            "/remote/input/queries.txt",
+            "--llm-model",
+            "/remote/models/fake.gguf",
+            "--embedding-model",
+            "/remote/models/embedding-config.json",
+            "--sqlite-db",
+            "/remote/runtime/rag.sqlite3",
+            "--index-path",
+            "/remote/runtime/rag.faiss",
+            "--state-snapshot-in",
+            "/remote/runtime/state.snapshot.tsv",
+            "--output-dir",
+            str(output_dir),
+            "--preset",
+            "dense_only",
+        ],
+        cwd=REPO_ROOT,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+
+
+def test_runs_matrix_via_fake_adb_device_from_binary_dir(temp_root: Path) -> None:
+    device_root = temp_root / "device_root"
+    remote_binary = device_root / "remote" / "bin" / "mobile_rag_cli"
+    write_fake_cli(
+        remote_binary,
+        require_binary_dir_in_ld_library_path=True,
+        require_cwd_matches_binary_dir=True,
+    )
+
+    remote_query_file = device_root / "remote" / "input" / "queries.txt"
+    write_text(remote_query_file, "what is sqlite?\n")
+
+    for remote_path in (
+        device_root / "remote" / "models" / "fake.gguf",
+        device_root / "remote" / "models" / "embedding-config.json",
+        device_root / "remote" / "runtime" / "rag.sqlite3",
+        device_root / "remote" / "runtime" / "rag.faiss",
+        device_root / "remote" / "runtime" / "state.snapshot.tsv",
+    ):
+        write_text(remote_path, "stub\n")
+
+    fake_adb = temp_root / "fake_adb.py"
+    write_fake_adb(fake_adb, device_root)
+
+    output_dir = temp_root / "device_benchmark_workdir"
+    result = run_command(
+        [
+            sys.executable,
+            str(RUNNER),
+            "--adb",
+            str(fake_adb),
+            "--adb-serial",
+            "fd8657d6",
+            "--remote-workdir",
+            "/remote/bench",
+            "--binary",
+            "/remote/bin/mobile_rag_cli",
+            "--query-file",
+            "/remote/input/queries.txt",
+            "--llm-model",
+            "/remote/models/fake.gguf",
+            "--embedding-model",
+            "/remote/models/embedding-config.json",
+            "--sqlite-db",
+            "/remote/runtime/rag.sqlite3",
+            "--index-path",
+            "/remote/runtime/rag.faiss",
+            "--state-snapshot-in",
+            "/remote/runtime/state.snapshot.tsv",
+            "--output-dir",
+            str(output_dir),
+            "--preset",
+            "dense_only",
+        ],
+        cwd=REPO_ROOT,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+
+
 def test_accepts_state_aware_presets(temp_root: Path) -> None:
     fake_cli = temp_root / "fake_mobile_rag_cli.py"
     write_fake_cli(fake_cli)
@@ -467,7 +678,9 @@ def main() -> int:
         test_runs_matrix_and_writes_manifest(temp_root / "case1")
         test_replays_manifest_into_new_output_dir(temp_root / "case2")
         test_runs_matrix_via_fake_adb_device(temp_root / "case3")
-        test_accepts_state_aware_presets(temp_root / "case4")
+        test_runs_matrix_via_fake_adb_device_with_binary_dir_library_path(temp_root / "case4")
+        test_runs_matrix_via_fake_adb_device_from_binary_dir(temp_root / "case5")
+        test_accepts_state_aware_presets(temp_root / "case6")
     print("Benchmark runner test passed")
     return 0
 

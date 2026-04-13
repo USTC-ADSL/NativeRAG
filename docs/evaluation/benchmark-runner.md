@@ -37,6 +37,7 @@ This patch adds a small outer-loop benchmark runner that drives those existing e
 - The runner supports two execution modes:
   - local host execution against a local CLI binary
   - device execution through `adb`, with artifact pull-back into the local output directory
+- In device mode the runner now executes the remote command from the CLI binary directory itself and prefixes the invocation with `env LD_LIBRARY_PATH=.` so Android can resolve colocated runtime libraries such as `libMNN.so`, `libllama.so`, and `libfaiss.so` from the same deployment directory as `mobile_rag_cli`.
 - Preset selection is explicit and maps to existing query-time flags:
   - `dense_only`: no retrieval prefilter flags
   - `dense_only_state_aware`: `--state-aware-dense`
@@ -47,6 +48,7 @@ This patch adds a small outer-loop benchmark runner that drives those existing e
 - Each run reuses the same shared query/model/index inputs, which keeps baseline comparisons aligned.
 - If `--state-snapshot-in` is provided, the same input snapshot is reused for every preset so replay and ablation runs start from the same saved state.
 - In device mode the runner first checks `adb devices`, requires the selected serial to be in `device` state, runs the remote CLI once per preset, and pulls the generated artifacts back before summarizing them.
+- The remote command derives the working directory from the CLI binary path itself instead of assuming the device shell already starts in a usable directory or already exports a usable `LD_LIBRARY_PATH`.
 - Replay mode reads `manifest.json`, reconstructs the shared inputs plus preset list, and reruns the matrix into a fresh output directory.
 - Focused smoke coverage lives in `tests/test_benchmark_runner.py`; it uses a fake CLI binary so the test stays fast and deterministic.
 
@@ -169,6 +171,7 @@ The runner writes evaluation artifacts beside existing JSONL / CSV / snapshot ou
 
 - Replay currently reuses the saved shared configuration and preset list, but it does not diff new artifacts against the original manifest.
 - Device mode assumes the CLI binary, query file, models, and index inputs are already present on the target device; it does not push them automatically.
+- Device mode assumes the required shared libraries are deployed alongside the CLI binary, because the runner `cd`s into the binary directory and launches the CLI with `LD_LIBRARY_PATH=.`
 - The summary only surfaces metrics already present in per-run batch reports; it does not compute deeper citation metrics itself.
 - Presets are fixed and heuristic for now; there is no external experiment spec file yet.
 - The default preset list still prioritizes the original baseline trio; state-aware presets must be requested explicitly.

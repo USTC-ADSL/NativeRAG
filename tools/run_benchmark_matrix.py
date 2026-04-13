@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import shlex
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -317,6 +318,20 @@ def adb_base_command(shared_config: dict) -> List[str]:
     return [shared_config["adb"], "-s", shared_config["adb_serial"]]
 
 
+def build_adb_shell_command(shared_config: dict, cli_command: List[str]) -> List[str]:
+    binary_dir = str(PurePosixPath(shared_config["binary"]).parent)
+    remote_binary_name = PurePosixPath(shared_config["binary"]).name
+    remote_cli_command = [f"./{remote_binary_name}"] + cli_command[1:]
+    if binary_dir and binary_dir != ".":
+        command_string = (
+            f"cd {shlex.quote(binary_dir)} && "
+            + shlex.join(["env", "LD_LIBRARY_PATH=."] + remote_cli_command)
+        )
+    else:
+        command_string = shlex.join(["env", "LD_LIBRARY_PATH=."] + cli_command)
+    return adb_base_command(shared_config) + ["shell", command_string]
+
+
 def verify_device_ready(shared_config: dict) -> None:
     if shared_config.get("execution_mode") != "adb":
         return
@@ -364,7 +379,7 @@ def run_matrix(shared_config: dict, output_dir: Path) -> tuple[dict, dict]:
             if mkdir_result.returncode != 0:
                 fail(f"Error: failed to create remote run directory {remote_run_dir}")
             cli_command = build_cli_command(shared_config, preset, remote_artifacts)
-            host_command = adb_base_command(shared_config) + ["shell"] + cli_command
+            host_command = build_adb_shell_command(shared_config, cli_command)
             result = run_subprocess(host_command)
         else:
             cli_command = build_cli_command(
