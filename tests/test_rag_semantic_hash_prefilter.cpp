@@ -293,8 +293,10 @@ void test_adaptive_graph_logs_controller_selection() {
   assert(trace.semantic_hash_prefilter_enabled);
   assert(trace.semantic_hash_candidate_limit == 1);
   assert(trace.semantic_hash_max_distance == 0);
+  assert(!trace.state_aware_dense_enabled);
   assert(trace.lexical_candidate_count == 1);
   assert(trace.hash_candidate_count == 0);
+  assert(trace.state_filtered_candidate_count == 0);
   assert(trace.dense_result_count == 1);
   assert(trace.fallback_reason == "none");
   assert(trace.promoted_to_hot == 1);
@@ -341,6 +343,8 @@ void test_adaptive_graph_logs_controller_selection() {
   assert(trace_json.find("\"top_k\": 1") != std::string::npos);
   assert(trace_json.find("\"lexical_prefilter_enabled\": true") != std::string::npos);
   assert(trace_json.find("\"semantic_hash_candidate_limit\": 1") != std::string::npos);
+  assert(trace_json.find("\"state_aware_dense_enabled\": false") != std::string::npos);
+  assert(trace_json.find("\"state_filtered_candidate_count\": 0") != std::string::npos);
   assert(trace_json.find("\"promoted_to_hot\": 1") != std::string::npos);
   assert(trace_json.find("\"hot\": 1") != std::string::npos);
   assert(trace_json.find("\"transition_count\": 3") != std::string::npos);
@@ -363,6 +367,8 @@ void test_adaptive_graph_logs_controller_selection() {
          std::string::npos);
   assert(trace_jsonl.find("\"budget_class\":\"tight\"") != std::string::npos);
   assert(trace_jsonl.find("\"semantic_hash_candidate_limit\":1") != std::string::npos);
+  assert(trace_jsonl.find("\"state_aware_dense_enabled\":false") != std::string::npos);
+  assert(trace_jsonl.find("\"state_filtered_candidate_count\":0") != std::string::npos);
   assert(trace_jsonl.find("\"promoted_to_hot\":1") != std::string::npos);
   assert(trace_jsonl.find("\"transition_count\":3") != std::string::npos);
   assert(trace_jsonl.find("\"query_embedding_ms\":") != std::string::npos);
@@ -376,11 +382,13 @@ void test_adaptive_graph_logs_controller_selection() {
                           std::istreambuf_iterator<char>());
   assert(summary_csv.find("query,answer,adaptive_graph_enabled,budget_class") !=
          std::string::npos);
+  assert(summary_csv.find("state_aware_dense_enabled,lexical_candidate_count,hash_candidate_count,state_filtered_candidate_count,dense_result_count") !=
+         std::string::npos);
   assert(summary_csv.find("query_embedding_ms,retrieval_ms,evidence_ms,state_update_ms,prompt_build_ms,generation_ms,total_ms,peak_rss_kb,llm_backend,embedding_backend,query_source,num_threads,max_new_tokens,sqlite_db_size_bytes,index_size_bytes") !=
          std::string::npos);
   assert(summary_csv.find("sqlite metadata retrieval traces,SQLite stores metadata and traces for this project.,true,tight") !=
          std::string::npos);
-  assert(summary_csv.find(",lexical_prefilter,lexical_prefilter,term_rich_query,evidence_sufficient,1,true,1,true,1,0,1,0,1,none,1,0,1,1,0,3,") !=
+  assert(summary_csv.find(",lexical_prefilter,lexical_prefilter,term_rich_query,evidence_sufficient,1,true,1,true,1,0,false,1,0,0,1,none,1,0,1,1,0,3,") !=
          std::string::npos);
   assert(summary_csv.find(",LlamaCpp,MNN,inline,4,256,1234,5678") !=
          std::string::npos);
@@ -439,6 +447,51 @@ void test_query_promotes_new_hit_and_demotes_previous_hot_chunk() {
   std::filesystem::remove(db_path);
 }
 
+void test_state_aware_dense_skips_cold_shortlist_candidates() {
+  const std::string db_path = make_temp_db_path("state-aware-dense");
+  std::filesystem::remove(db_path);
+
+  auto sqlite_db = std::make_shared<SqliteVectorDB>(db_path);
+  auto embedder = std::make_shared<FakeEmbeddingModel>();
+  auto index = std::make_shared<FakeVectorIndex>();
+  auto llm = std::make_shared<FakeLLM>();
+
+  TestableRAGPipeline pipeline(nullptr, embedder, index, llm, sqlite_db, 1, 128, 16);
+  pipeline.set_lexical_prefilter({true, 1});
+  pipeline.set_state_aware_dense({true});
+
+  const std::vector<std::string> texts = {
+      "SQLite metadata lives in the cold partition.",
+      "Dense fallback answer from the warm partition.",
+  };
+  const std::vector<std::vector<float>> vectors = {
+      {1.0f, 0.0f},
+      {0.0f, 1.0f},
+  };
+  assert(pipeline.ingest(texts, vectors, "state-aware-dense-test"));
+  assert(sqlite_db->update_chunk_state(0, ChunkState::COLD, "manual_cold"));
+  assert(sqlite_db->get_chunk_state(0) == "cold");
+  assert(sqlite_db->get_chunk_state(1) == "warm");
+
+  const std::string query = "sqlite metadata";
+  embedder->query_embeddings[query] = {1.0f, 0.0f};
+  index->search_results = {{1, 0.83f}};
+
+  const auto run = run_query_and_capture_stdout(pipeline, query);
+  assert(index->search_calls == 1);
+  assert(run.answer.find("Dense fallback answer from the warm partition.") !=
+         std::string::npos);
+  assert(run.stdout_text.find("fallback=state_filtered_shortlist_empty") !=
+         std::string::npos);
+
+  const auto& trace = pipeline.last_query_trace();
+  assert(trace.state_aware_dense_enabled);
+  assert(trace.state_filtered_candidate_count == 1);
+  assert(trace.fallback_reason == "state_filtered_shortlist_empty");
+
+  std::filesystem::remove(db_path);
+}
+
 }  // namespace
 
 int main() {
@@ -447,5 +500,6 @@ int main() {
   test_lexical_and_hash_shortlists_are_merged_before_dense_rerank();
   test_adaptive_graph_logs_controller_selection();
   test_query_promotes_new_hit_and_demotes_previous_hot_chunk();
+  test_state_aware_dense_skips_cold_shortlist_candidates();
   return 0;
 }

@@ -215,6 +215,8 @@ std::string serialize_query_trace_json(const RAGPipeline::QueryTrace& trace, boo
       << trace.semantic_hash_candidate_limit << "," << newline
       << indent(1) << "\"semantic_hash_max_distance\"" << colon
       << trace.semantic_hash_max_distance << "," << newline
+      << indent(1) << "\"state_aware_dense_enabled\"" << colon
+      << (trace.state_aware_dense_enabled ? "true" : "false") << "," << newline
       << indent(1) << "\"escalated\"" << colon
       << (trace.escalated ? "true" : "false") << "," << newline
       << indent(1) << "\"escalation_from\"" << colon << "\"" << json_escape(trace.escalation_from) << "\"," << newline
@@ -222,6 +224,8 @@ std::string serialize_query_trace_json(const RAGPipeline::QueryTrace& trace, boo
       << indent(1) << "\"escalation_reason\"" << colon << "\"" << json_escape(trace.escalation_reason) << "\"," << newline
       << indent(1) << "\"lexical_candidate_count\"" << colon << trace.lexical_candidate_count << "," << newline
       << indent(1) << "\"hash_candidate_count\"" << colon << trace.hash_candidate_count << "," << newline
+      << indent(1) << "\"state_filtered_candidate_count\"" << colon
+      << trace.state_filtered_candidate_count << "," << newline
       << indent(1) << "\"dense_result_count\"" << colon << trace.dense_result_count << "," << newline
       << indent(1) << "\"fallback_reason\"" << colon << "\"" << json_escape(trace.fallback_reason) << "\"," << newline
       << indent(1) << "\"promoted_to_hot\"" << colon << trace.promoted_to_hot << "," << newline
@@ -310,6 +314,7 @@ struct RetrievalExecution {
   std::vector<std::pair<int64_t, float>> results;
   size_t lexical_candidate_count = 0;
   size_t hash_candidate_count = 0;
+  size_t state_filtered_candidate_count = 0;
   std::string fallback_reason = "prefilter_disabled";
 };
 
@@ -357,6 +362,10 @@ void RAGPipeline::set_lexical_prefilter(LexicalPrefilterConfig config) {
   lexical_prefilter_.enabled = config.enabled;
   lexical_prefilter_.candidate_limit =
       std::max(top_k_, std::max(1, config.candidate_limit));
+}
+
+void RAGPipeline::set_state_aware_dense(StateAwareDenseConfig config) {
+  state_aware_dense_.enabled = config.enabled;
 }
 
 void RAGPipeline::set_graph_selector_config(GraphSelector::Config config) {
@@ -412,7 +421,8 @@ bool RAGPipeline::append_last_query_trace_summary_csv(const std::string& output_
         << "initial_reason,final_reason,top_k,lexical_prefilter_enabled,"
         << "lexical_candidate_limit,semantic_hash_prefilter_enabled,"
         << "semantic_hash_candidate_limit,semantic_hash_max_distance,"
-        << "lexical_candidate_count,hash_candidate_count,dense_result_count,"
+        << "state_aware_dense_enabled,lexical_candidate_count,hash_candidate_count,"
+        << "state_filtered_candidate_count,dense_result_count,"
         << "fallback_reason,promoted_to_hot,demoted_to_warm,hot,warm,cold,"
         << "transition_count,top_score,second_score,score_margin,score_sharpness,"
         << "retrieved_chunk_count,query_term_count,covered_query_terms,coverage_ratio,"
@@ -446,8 +456,10 @@ bool RAGPipeline::append_last_query_trace_summary_csv(const std::string& output_
       << (last_query_trace_.semantic_hash_prefilter_enabled ? "true" : "false") << ","
       << last_query_trace_.semantic_hash_candidate_limit << ","
       << last_query_trace_.semantic_hash_max_distance << ","
+      << (last_query_trace_.state_aware_dense_enabled ? "true" : "false") << ","
       << last_query_trace_.lexical_candidate_count << ","
       << last_query_trace_.hash_candidate_count << ","
+      << last_query_trace_.state_filtered_candidate_count << ","
       << last_query_trace_.dense_result_count << ","
       << csv_escape(last_query_trace_.fallback_reason) << ","
       << last_query_trace_.promoted_to_hot << ","
@@ -729,6 +741,7 @@ std::string RAGPipeline::answer_query(const std::string& query) {
   query_trace.semantic_hash_prefilter_enabled = semantic_hash_prefilter_.enabled;
   query_trace.semantic_hash_candidate_limit = semantic_hash_prefilter_.candidate_limit;
   query_trace.semantic_hash_max_distance = semantic_hash_prefilter_.max_hamming_distance;
+  query_trace.state_aware_dense_enabled = state_aware_dense_.enabled;
 
   RetrievalGraph active_graph =
       graph_from_prefilter_flags(lexical_prefilter_.enabled, semantic_hash_prefilter_.enabled);
@@ -792,13 +805,27 @@ std::string RAGPipeline::answer_query(const std::string& query) {
       }
     }
 
+    if (state_aware_dense_.enabled && !candidate_ids.empty()) {
+      const auto dense_candidate_ids = sqlite_db_->filter_ids_by_chunk_states(
+          candidate_ids, {ChunkState::WARM, ChunkState::HOT});
+      execution.state_filtered_candidate_count =
+          candidate_ids.size() - dense_candidate_ids.size();
+      candidate_ids = dense_candidate_ids;
+    }
+
     if (!candidate_ids.empty()) {
       execution.results = sqlite_db_->search_with_ids(q, candidate_ids, top_k_);
       if (execution.results.empty()) {
-        execution.fallback_reason = "sqlite_rerank_empty";
+        execution.fallback_reason =
+            execution.state_filtered_candidate_count > 0
+                ? "state_filtered_sqlite_rerank_empty"
+                : "sqlite_rerank_empty";
       }
     } else {
-      execution.fallback_reason = "empty_shortlist";
+      execution.fallback_reason =
+          execution.state_filtered_candidate_count > 0
+              ? "state_filtered_shortlist_empty"
+              : "empty_shortlist";
     }
 
     if (execution.results.empty()) {
@@ -878,10 +905,12 @@ std::string RAGPipeline::answer_query(const std::string& query) {
   std::cout << "[RETRIEVAL] mode=" << retrieval_graph_name(active_graph)
             << " lexical_candidates=" << execution.lexical_candidate_count
             << " hash_candidates=" << execution.hash_candidate_count
+            << " state_filtered_candidates=" << execution.state_filtered_candidate_count
             << " dense_results=" << execution.results.size()
             << " fallback=" << execution.fallback_reason << '\n';
   query_trace.lexical_candidate_count = execution.lexical_candidate_count;
   query_trace.hash_candidate_count = execution.hash_candidate_count;
+  query_trace.state_filtered_candidate_count = execution.state_filtered_candidate_count;
   query_trace.dense_result_count = execution.results.size();
   query_trace.fallback_reason = execution.fallback_reason;
 

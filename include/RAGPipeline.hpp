@@ -29,6 +29,10 @@ class RAGPipeline {
     int candidate_limit = 16;
   };
 
+  struct StateAwareDenseConfig {
+    bool enabled = false;
+  };
+
   struct QueryTraceResult {
     int64_t id = -1;
     float score = 0.0f;
@@ -82,8 +86,10 @@ class RAGPipeline {
     std::string escalation_from;
     std::string escalation_to;
     std::string escalation_reason;
+    bool state_aware_dense_enabled = false;
     size_t lexical_candidate_count = 0;
     size_t hash_candidate_count = 0;
+    size_t state_filtered_candidate_count = 0;
     size_t dense_result_count = 0;
     std::string fallback_reason = "prefilter_disabled";
     int promoted_to_hot = 0;
@@ -137,6 +143,7 @@ class RAGPipeline {
 
   void set_semantic_hash_prefilter(SemanticHashPrefilterConfig config);
   void set_lexical_prefilter(LexicalPrefilterConfig config);
+  void set_state_aware_dense(StateAwareDenseConfig config);
   void set_graph_selector_config(GraphSelector::Config config);
   void set_trace_runtime_metadata(TraceRuntimeMetadata metadata);
 
@@ -158,6 +165,7 @@ class RAGPipeline {
   size_t chunk_overlap_ = 200;
   SemanticHashPrefilterConfig semantic_hash_prefilter_;
   LexicalPrefilterConfig lexical_prefilter_;
+  StateAwareDenseConfig state_aware_dense_;
   GraphSelector graph_selector_;
   TraceRuntimeMetadata trace_runtime_metadata_;
   QueryTrace last_query_trace_;

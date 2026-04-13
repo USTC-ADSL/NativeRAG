@@ -116,6 +116,8 @@ int main(int argc, char** argv) {
               << config.semantic_hash_max_distance << '\n'
               << "  Adaptive Graph: "
               << (config.adaptive_graph ? "enabled" : "disabled") << '\n'
+              << "  State-Aware Dense: "
+              << (config.state_aware_dense ? "enabled" : "disabled") << '\n'
               << "  State Snapshot In: "
               << (config.state_snapshot_in_path.empty() ? "(none)"
                                                         : config.state_snapshot_in_path) << '\n'
@@ -185,6 +187,7 @@ int main(int argc, char** argv) {
         {config.semantic_hash_prefilter,
          config.semantic_hash_candidate_limit,
          config.semantic_hash_max_distance});
+    pipeline.set_state_aware_dense({config.state_aware_dense});
     if (config.data_source == CommandLineArgs::Config::DataSource::DATASET) {
       std::cerr << "[ERROR] Dataset mode is not supported in this binary. "
                    "Use main_with_dataset instead."
@@ -309,6 +312,7 @@ int main(int argc, char** argv) {
         {config.semantic_hash_prefilter,
          config.semantic_hash_candidate_limit,
          config.semantic_hash_max_distance});
+    pipeline.set_state_aware_dense({config.state_aware_dense});
 
     if (config.verbose) {
       std::cout << "[INFO] === ONLINE PHASE: Query Processing ===\n";
@@ -466,6 +470,7 @@ int main(int argc, char** argv) {
         {config.semantic_hash_prefilter,
          config.semantic_hash_candidate_limit,
          config.semantic_hash_max_distance});
+    pipeline.set_state_aware_dense({config.state_aware_dense});
 
     std::cout << "╔════════════════════════════════════════════════════════════╗\n"
               << "║         NativeRAG - Interactive Mode                       ║\n"

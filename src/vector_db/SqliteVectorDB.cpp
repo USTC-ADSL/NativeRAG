@@ -555,6 +555,31 @@ std::vector<std::pair<int64_t, float>> SqliteVectorDB::search_with_ids(
   return scored_results;
 }
 
+std::vector<int64_t> SqliteVectorDB::filter_ids_by_chunk_states(
+    const std::vector<int64_t>& candidate_ids,
+    const std::vector<ChunkState>& allowed_states) const {
+  std::vector<int64_t> filtered_ids;
+  if (!db_ || candidate_ids.empty() || allowed_states.empty()) {
+    return filtered_ids;
+  }
+
+  std::unordered_set<std::string> allowed_state_names;
+  allowed_state_names.reserve(allowed_states.size());
+  for (const auto state : allowed_states) {
+    allowed_state_names.insert(chunk_state_name(state));
+  }
+
+  filtered_ids.reserve(candidate_ids.size());
+  for (const auto id : candidate_ids) {
+    const std::string state = load_chunk_state(db_, id);
+    if (allowed_state_names.count(state) > 0) {
+      filtered_ids.push_back(id);
+    }
+  }
+
+  return filtered_ids;
+}
+
 std::vector<std::pair<int64_t, float>> SqliteVectorDB::search_text_lexical(
     const std::string& query,
     int k) const {

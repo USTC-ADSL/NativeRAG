@@ -89,6 +89,8 @@ int main(int argc, char** argv) {
               << config.semantic_hash_max_distance << '\n'
               << "  Adaptive Graph: "
               << (config.adaptive_graph ? "enabled" : "disabled") << '\n'
+              << "  State-Aware Dense: "
+              << (config.state_aware_dense ? "enabled" : "disabled") << '\n'
               << "  State Snapshot In: "
               << (config.state_snapshot_in_path.empty() ? "(none)"
                                                         : config.state_snapshot_in_path) << '\n'
@@ -159,6 +161,7 @@ int main(int argc, char** argv) {
         {config.semantic_hash_prefilter,
          config.semantic_hash_candidate_limit,
          config.semantic_hash_max_distance});
+    pipeline.set_state_aware_dense({config.state_aware_dense});
     // ========== 离线阶段 (Offline/Indexing Phase) ==========
     if (config.verbose) {
       std::cout << "[INFO] === OFFLINE PHASE: Building Index ===\n"
@@ -297,6 +300,7 @@ int main(int argc, char** argv) {
         {config.semantic_hash_prefilter,
          config.semantic_hash_candidate_limit,
          config.semantic_hash_max_distance});
+    pipeline.set_state_aware_dense({config.state_aware_dense});
 
     if (config.verbose) {
       std::cout << "[INFO] === ONLINE PHASE: Query Processing ===\n";
@@ -456,6 +460,7 @@ int main(int argc, char** argv) {
         {config.semantic_hash_prefilter,
          config.semantic_hash_candidate_limit,
          config.semantic_hash_max_distance});
+    pipeline.set_state_aware_dense({config.state_aware_dense});
 
     std::cout << "╔════════════════════════════════════════════════════════════╗\n"
               << "║    NativeRAG with Dataset - Interactive Mode              ║\n"

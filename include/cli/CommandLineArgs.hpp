@@ -75,6 +75,7 @@ class CommandLineArgs {
     bool lexical_prefilter = false;
     bool semantic_hash_prefilter = false;
     bool adaptive_graph = false;
+    bool state_aware_dense = false;
   };
 
   CommandLineArgs(int argc, char** argv);
