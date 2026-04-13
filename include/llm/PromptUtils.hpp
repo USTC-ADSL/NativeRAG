@@ -48,6 +48,76 @@ inline std::string remove_tag_blocks(std::string text,
   return text;
 }
 
+inline std::string to_lower_copy(std::string text) {
+  for (char& ch : text) {
+    ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+  }
+  return text;
+}
+
+inline bool looks_like_meta_reasoning_line(const std::string& line) {
+  const std::string lowered = to_lower_copy(trim_copy(line));
+  if (lowered.empty()) {
+    return false;
+  }
+
+  return lowered.rfind("okay,", 0) == 0 ||
+         lowered.rfind("ok,", 0) == 0 ||
+         lowered.rfind("the user is", 0) == 0 ||
+         lowered.rfind("the user wants", 0) == 0 ||
+         lowered.rfind("looking at", 0) == 0 ||
+         lowered.rfind("let me", 0) == 0 ||
+         lowered.rfind("i should", 0) == 0 ||
+         lowered.rfind("i need", 0) == 0 ||
+         lowered.rfind("we need", 0) == 0;
+}
+
+inline std::string strip_meta_reasoning_tail(const std::string& text) {
+  std::string kept;
+  std::string current_line;
+  bool has_answer_content = false;
+
+  auto flush_line = [&]() {
+    const std::string trimmed = trim_copy(current_line);
+    if (trimmed.empty()) {
+      if (!kept.empty() && kept.back() != '\n') {
+        kept.push_back('\n');
+      }
+      current_line.clear();
+      return false;
+    }
+
+    if (has_answer_content && looks_like_meta_reasoning_line(trimmed)) {
+      current_line.clear();
+      return true;
+    }
+
+    if (!kept.empty() && kept.back() != '\n') {
+      kept.push_back('\n');
+    }
+    kept += trimmed;
+    has_answer_content = true;
+    current_line.clear();
+    return false;
+  };
+
+  for (char ch : text) {
+    if (ch == '\n' || ch == '\r') {
+      if (flush_line()) {
+        break;
+      }
+      continue;
+    }
+    current_line.push_back(ch);
+  }
+
+  if (!current_line.empty()) {
+    flush_line();
+  }
+
+  return trim_copy(kept);
+}
+
 inline std::string cleanup_generation_output(const std::string & raw_text) {
   const std::string raw = trim_copy(raw_text);
   if (raw.empty()) {
@@ -63,6 +133,8 @@ inline std::string cleanup_generation_output(const std::string & raw_text) {
   if (cleaned.rfind(answer_prefix, 0) == 0) {
     cleaned = trim_copy(cleaned.substr(answer_prefix.size()));
   }
+
+  cleaned = strip_meta_reasoning_tail(cleaned);
 
   if (!cleaned.empty()) {
     return cleaned;

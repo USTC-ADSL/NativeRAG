@@ -138,6 +138,14 @@ target_link_libraries(test_llama_logging PRIVATE
     ${GGML_BASE_LIBRARY}
 )
 
+add_executable(test_prompt_utils
+    ${CMAKE_CURRENT_SOURCE_DIR}/test_prompt_utils.cpp
+)
+
+target_include_directories(test_prompt_utils PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+)
+
 add_executable(test_semantic_hashing
     ${CMAKE_CURRENT_SOURCE_DIR}/group_c_vectordb/test_semantic_hashing.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/vector_db/SqliteVectorDB.cpp
@@ -368,6 +376,7 @@ endif()
 enable_testing()
 add_test(NAME CommandLineArgsTest COMMAND $<TARGET_FILE:test_command_line_args>)
 add_test(NAME LlamaLoggingTest COMMAND $<TARGET_FILE:test_llama_logging>)
+add_test(NAME PromptUtilsTest COMMAND $<TARGET_FILE:test_prompt_utils>)
 add_test(NAME SemanticHashingTest COMMAND $<TARGET_FILE:test_semantic_hashing>)
 add_test(NAME RAGSemanticHashPrefilterTest COMMAND $<TARGET_FILE:test_rag_semantic_hash_prefilter>)
 add_test(NAME SqliteVectorDBBackendTest COMMAND $<TARGET_FILE:test_sqlite_vectordb_backend>)
@@ -381,6 +390,7 @@ add_test(NAME RAGIntegrationTest COMMAND $<TARGET_FILE:test_rag_integration>)
 set_tests_properties(
     CommandLineArgsTest
     LlamaLoggingTest
+    PromptUtilsTest
     SemanticHashingTest
     RAGSemanticHashPrefilterTest
     SqliteVectorDBBackendTest
@@ -405,6 +415,7 @@ if(USE_PREBUILT)
 endif()
 
 message(STATUS "Tests configured:")
+message(STATUS "  - test_prompt_utils (generation output cleanup)")
 message(STATUS "  - test_semantic_hashing (Group C - semantic hash)")
 message(STATUS "  - test_rag_semantic_hash_prefilter (query-time semantic hash prefilter)")
 message(STATUS "  - test_sqlite_vectordb_backend (SQLite lexical/vector backend)")
