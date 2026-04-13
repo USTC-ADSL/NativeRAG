@@ -41,6 +41,7 @@ The immediate goal is still not to finish the full paper controller. The goal of
 - `SqliteVectorDB` now attempts to create a `texts_fts` virtual table:
   - when SQLite FTS5 is available, lexical lookups use `MATCH` + `bm25`
   - when FTS5 is unavailable, lexical lookups fall back to scanning the canonical `texts` table with a deterministic token-overlap score
+  - when a database is reopened, `texts_fts` is refreshed from the canonical `texts` table so lexical search does not depend on a separately maintained sidecar index state
 - `RAGPipeline::add_text_embeddings(...)` now persists:
   - dense vectors into SQLite
   - text chunks into SQLite

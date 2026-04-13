@@ -73,6 +73,25 @@ int main() {
     assert(reopened_lexical[0].first == 20);
   }
 
+  {
+    sqlite3* raw_db = nullptr;
+    assert(sqlite3_open(db_path.c_str(), &raw_db) == SQLITE_OK);
+    char* err = nullptr;
+    assert(sqlite3_exec(raw_db, "DELETE FROM texts_fts;", nullptr, nullptr, &err) == SQLITE_OK);
+    if (err) {
+      sqlite3_free(err);
+    }
+    sqlite3_close(raw_db);
+  }
+
+  {
+    SqliteVectorDB reopened_after_fts_clear(db_path);
+    const auto repaired_lexical = reopened_after_fts_clear.search_text_lexical("alpha", 2);
+    assert(repaired_lexical.size() == 2);
+    assert(repaired_lexical[0].first == 10);
+    assert(repaired_lexical[1].first == 30);
+  }
+
   std::filesystem::remove(db_path);
   std::cout << "SqliteVectorDB backend test passed\n";
   return 0;

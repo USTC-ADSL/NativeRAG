@@ -70,7 +70,7 @@ int lexical_overlap_score(const std::vector<std::string>& query_terms,
   return score;
 }
 
-void try_enable_text_fts(sqlite3* db) {
+bool try_enable_text_fts(sqlite3* db) {
   const char* sql =
       "CREATE VIRTUAL TABLE IF NOT EXISTS texts_fts "
       "USING fts5(text, tokenize='unicode61');";
@@ -78,6 +78,27 @@ void try_enable_text_fts(sqlite3* db) {
   const int rc = sqlite3_exec(db, sql, exec_noop_callback, nullptr, &err);
   if (rc != SQLITE_OK) {
     std::cerr << "[SqliteVectorDB] Warning: Failed to enable texts_fts: "
+              << (err ? err : sqlite3_errmsg(db))
+              << ". Falling back to non-FTS lexical search.\n";
+    if (err) {
+      sqlite3_free(err);
+    }
+    return false;
+  }
+  if (err) {
+    sqlite3_free(err);
+  }
+  return true;
+}
+
+void try_refresh_text_fts(sqlite3* db) {
+  const char* sql =
+      "DELETE FROM texts_fts;"
+      "INSERT INTO texts_fts(rowid, text) SELECT id, text FROM texts;";
+  char* err = nullptr;
+  const int rc = sqlite3_exec(db, sql, exec_noop_callback, nullptr, &err);
+  if (rc != SQLITE_OK) {
+    std::cerr << "[SqliteVectorDB] Warning: Failed to refresh texts_fts from texts: "
               << (err ? err : sqlite3_errmsg(db))
               << ". Falling back to non-FTS lexical search.\n";
   }
@@ -166,7 +187,9 @@ bool SqliteVectorDB::initialize_schema() {
     return false;
   }
   if (err) sqlite3_free(err);
-  try_enable_text_fts(db_);
+  if (try_enable_text_fts(db_)) {
+    try_refresh_text_fts(db_);
+  }
   return true;
 }
 
