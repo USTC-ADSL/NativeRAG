@@ -81,6 +81,10 @@ int main(int argc, char** argv) {
               << "  Query Trace Out: "
               << (config.query_trace_out_path.empty() ? "(none)"
                                                       : config.query_trace_out_path) << '\n'
+              << "  Query Summary CSV Out: "
+              << (config.query_summary_csv_out_path.empty() ? "(none)"
+                                                            : config.query_summary_csv_out_path)
+              << '\n'
               << "  Chunk Size: " << config.chunk_size << '\n'
               << "  Chunk Overlap: " << config.chunk_overlap << '\n';
   }
@@ -281,6 +285,16 @@ int main(int argc, char** argv) {
       }
       std::cout << "✓ Query trace exported to: "
                 << config.query_trace_out_path << '\n';
+    }
+
+    if (!config.query_summary_csv_out_path.empty()) {
+      if (!pipeline.append_last_query_trace_summary_csv(config.query_summary_csv_out_path)) {
+        std::cerr << "[ERROR] Failed to append query summary CSV: "
+                  << config.query_summary_csv_out_path << '\n';
+        return 1;
+      }
+      std::cout << "✓ Query summary CSV appended to: "
+                << config.query_summary_csv_out_path << '\n';
     }
 
     if (!config.state_snapshot_out_path.empty()) {

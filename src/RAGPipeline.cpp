@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -141,6 +142,31 @@ std::string json_escape(const std::string& input) {
   return escaped.str();
 }
 
+std::string csv_escape(const std::string& input) {
+  bool needs_quotes = false;
+  for (const unsigned char ch : input) {
+    if (ch == '"' || ch == ',' || ch == '\n' || ch == '\r') {
+      needs_quotes = true;
+      break;
+    }
+  }
+
+  if (!needs_quotes) {
+    return input;
+  }
+
+  std::string escaped = "\"";
+  for (const unsigned char ch : input) {
+    if (ch == '"') {
+      escaped += "\"\"";
+    } else {
+      escaped.push_back(static_cast<char>(ch));
+    }
+  }
+  escaped += "\"";
+  return escaped;
+}
+
 struct RetrievalExecution {
   std::vector<std::pair<int64_t, float>> results;
   size_t lexical_candidate_count = 0;
@@ -274,6 +300,72 @@ bool RAGPipeline::export_last_query_trace(const std::string& output_path) const 
 
   out << "  ]\n"
       << "}\n";
+  return static_cast<bool>(out);
+}
+
+bool RAGPipeline::append_last_query_trace_summary_csv(const std::string& output_path) const {
+  if (!has_last_query_trace_ || output_path.empty()) {
+    return false;
+  }
+
+  const bool write_header =
+      !std::filesystem::exists(output_path) || std::filesystem::is_empty(output_path);
+  std::ofstream out(output_path, std::ios::app);
+  if (!out) {
+    return false;
+  }
+
+  if (write_header) {
+    out << "query,answer,adaptive_graph_enabled,budget_class,initial_graph,final_graph,"
+        << "initial_reason,final_reason,top_k,lexical_prefilter_enabled,"
+        << "lexical_candidate_limit,semantic_hash_prefilter_enabled,"
+        << "semantic_hash_candidate_limit,semantic_hash_max_distance,"
+        << "lexical_candidate_count,hash_candidate_count,dense_result_count,"
+        << "fallback_reason,promoted_to_hot,demoted_to_warm,hot,warm,cold,"
+        << "transition_count,top_score,second_score,score_margin,score_sharpness,"
+        << "retrieved_chunk_count,query_term_count,covered_query_terms,coverage_ratio,"
+        << "top_result_id,top_result_score\n";
+  }
+
+  const auto top_result_id =
+      last_query_trace_.results.empty() ? -1 : last_query_trace_.results.front().id;
+  const auto top_result_score =
+      last_query_trace_.results.empty() ? 0.0f : last_query_trace_.results.front().score;
+
+  out << csv_escape(last_query_trace_.query) << ","
+      << csv_escape(last_query_trace_.answer) << ","
+      << (last_query_trace_.adaptive_graph_enabled ? "true" : "false") << ","
+      << csv_escape(last_query_trace_.budget_class) << ","
+      << csv_escape(last_query_trace_.initial_graph) << ","
+      << csv_escape(last_query_trace_.final_graph) << ","
+      << csv_escape(last_query_trace_.initial_reason) << ","
+      << csv_escape(last_query_trace_.final_reason) << ","
+      << last_query_trace_.top_k << ","
+      << (last_query_trace_.lexical_prefilter_enabled ? "true" : "false") << ","
+      << last_query_trace_.lexical_candidate_limit << ","
+      << (last_query_trace_.semantic_hash_prefilter_enabled ? "true" : "false") << ","
+      << last_query_trace_.semantic_hash_candidate_limit << ","
+      << last_query_trace_.semantic_hash_max_distance << ","
+      << last_query_trace_.lexical_candidate_count << ","
+      << last_query_trace_.hash_candidate_count << ","
+      << last_query_trace_.dense_result_count << ","
+      << csv_escape(last_query_trace_.fallback_reason) << ","
+      << last_query_trace_.promoted_to_hot << ","
+      << last_query_trace_.demoted_to_warm << ","
+      << last_query_trace_.index_state.hot_count << ","
+      << last_query_trace_.index_state.warm_count << ","
+      << last_query_trace_.index_state.cold_count << ","
+      << last_query_trace_.index_state.transition_count << ","
+      << last_query_trace_.evidence.top_score << ","
+      << last_query_trace_.evidence.second_score << ","
+      << last_query_trace_.evidence.score_margin << ","
+      << last_query_trace_.evidence.score_sharpness << ","
+      << last_query_trace_.evidence.retrieved_chunk_count << ","
+      << last_query_trace_.evidence.query_term_count << ","
+      << last_query_trace_.evidence.covered_query_terms << ","
+      << last_query_trace_.evidence.coverage_ratio << ","
+      << top_result_id << ","
+      << top_result_score << "\n";
   return static_cast<bool>(out);
 }
 

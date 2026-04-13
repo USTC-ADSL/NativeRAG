@@ -226,8 +226,10 @@ void test_lexical_and_hash_shortlists_are_merged_before_dense_rerank() {
 void test_adaptive_graph_logs_controller_selection() {
   const std::string db_path = make_temp_db_path("adaptive-controller");
   const std::string trace_path = "/tmp/native_rag_query_trace.json";
+  const std::string summary_csv_path = "/tmp/native_rag_query_trace_summary.csv";
   std::filesystem::remove(db_path);
   std::filesystem::remove(trace_path);
+  std::filesystem::remove(summary_csv_path);
 
   auto sqlite_db = std::make_shared<SqliteVectorDB>(db_path);
   auto embedder = std::make_shared<FakeEmbeddingModel>();
@@ -305,9 +307,21 @@ void test_adaptive_graph_logs_controller_selection() {
   assert(trace_json.find("\"promoted_to_hot\":1") != std::string::npos);
   assert(trace_json.find("\"hot\":1") != std::string::npos);
   assert(trace_json.find("\"transition_count\":3") != std::string::npos);
+  assert(pipeline.append_last_query_trace_summary_csv(summary_csv_path));
+
+  std::ifstream summary_stream(summary_csv_path);
+  std::string summary_csv((std::istreambuf_iterator<char>(summary_stream)),
+                          std::istreambuf_iterator<char>());
+  assert(summary_csv.find("query,answer,adaptive_graph_enabled,budget_class") !=
+         std::string::npos);
+  assert(summary_csv.find("sqlite metadata retrieval traces,SQLite stores metadata and traces for this project.,true,tight") !=
+         std::string::npos);
+  assert(summary_csv.find(",lexical_prefilter,lexical_prefilter,term_rich_query,evidence_sufficient,1,true,1,true,1,0,1,0,1,none,1,0,1,1,0,3,") !=
+         std::string::npos);
 
   std::filesystem::remove(db_path);
   std::filesystem::remove(trace_path);
+  std::filesystem::remove(summary_csv_path);
 }
 
 void test_query_promotes_new_hit_and_demotes_previous_hot_chunk() {

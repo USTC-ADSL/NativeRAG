@@ -101,6 +101,7 @@ class RAGPipeline {
   std::string answer_query(const std::string& query);
   const QueryTrace& last_query_trace() const { return last_query_trace_; }
   bool export_last_query_trace(const std::string& output_path) const;
+  bool append_last_query_trace_summary_csv(const std::string& output_path) const;
 
   void set_semantic_hash_prefilter(SemanticHashPrefilterConfig config);
   void set_lexical_prefilter(LexicalPrefilterConfig config);
