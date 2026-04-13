@@ -5,8 +5,10 @@
 #include <cctype>
 #include <cmath>
 #include <cstring>
+#include <fstream>
 #include <iostream>
 #include <limits>
+#include <sstream>
 #include <unordered_set>
 
 #include "retrieval/SemanticHash.hpp"
@@ -242,6 +244,19 @@ bool write_chunk_transition_row(sqlite3* db,
   rc = sqlite3_step(stmt);
   sqlite3_finalize(stmt);
   return rc == SQLITE_DONE;
+}
+
+std::vector<std::string> split_tab_fields(const std::string& line) {
+  std::vector<std::string> fields;
+  std::string current;
+  std::istringstream stream(line);
+  while (std::getline(stream, current, '\t')) {
+    fields.push_back(current);
+  }
+  if (!line.empty() && line.back() == '\t') {
+    fields.emplace_back();
+  }
+  return fields;
 }
 
 }  // namespace
@@ -1120,6 +1135,275 @@ int SqliteVectorDB::count_chunk_state_transitions(int64_t id) const {
   }
   sqlite3_finalize(stmt);
   return count;
+}
+
+bool SqliteVectorDB::export_chunk_state_snapshot(const std::string& snapshot_path) const {
+  if (!db_ || snapshot_path.empty()) return false;
+
+  std::ofstream out(snapshot_path, std::ios::trunc);
+  if (!out) {
+    std::cerr << "[SqliteVectorDB] Failed to open snapshot for writing: "
+              << snapshot_path << '\n';
+    return false;
+  }
+
+  out << "STATE_SNAPSHOT_V1\n";
+
+  sqlite3_stmt* stmt = nullptr;
+  int rc = sqlite3_prepare_v2(
+      db_,
+      "SELECT id, tier, last_transition_reason, last_transition_at_unix_ms "
+      "FROM chunk_states ORDER BY id;",
+      -1, &stmt, nullptr);
+  if (rc != SQLITE_OK) {
+    std::cerr << "[SqliteVectorDB] Failed to prepare chunk_states snapshot query: "
+              << sqlite3_errmsg(db_) << '\n';
+    return false;
+  }
+
+  while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+    out << "STATE"
+        << '\t' << static_cast<int64_t>(sqlite3_column_int64(stmt, 0))
+        << '\t' << reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1))
+        << '\t' << reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2))
+        << '\t' << static_cast<long long>(sqlite3_column_int64(stmt, 3))
+        << '\n';
+  }
+  sqlite3_finalize(stmt);
+  if (rc != SQLITE_DONE) {
+    std::cerr << "[SqliteVectorDB] Failed while exporting chunk_states snapshot: "
+              << sqlite3_errmsg(db_) << '\n';
+    return false;
+  }
+
+  rc = sqlite3_prepare_v2(
+      db_,
+      "SELECT event_id, id, from_tier, to_tier, reason, created_at_unix_ms "
+      "FROM chunk_state_transitions ORDER BY id, created_at_unix_ms, event_id;",
+      -1, &stmt, nullptr);
+  if (rc != SQLITE_OK) {
+    std::cerr << "[SqliteVectorDB] Failed to prepare chunk_state_transitions snapshot query: "
+              << sqlite3_errmsg(db_) << '\n';
+    return false;
+  }
+
+  while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+    out << "TRANSITION"
+        << '\t' << static_cast<long long>(sqlite3_column_int64(stmt, 0))
+        << '\t' << static_cast<int64_t>(sqlite3_column_int64(stmt, 1))
+        << '\t' << reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2))
+        << '\t' << reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3))
+        << '\t' << reinterpret_cast<const char*>(sqlite3_column_text(stmt, 4))
+        << '\t' << static_cast<long long>(sqlite3_column_int64(stmt, 5))
+        << '\n';
+  }
+  sqlite3_finalize(stmt);
+  if (rc != SQLITE_DONE) {
+    std::cerr << "[SqliteVectorDB] Failed while exporting chunk_state_transitions snapshot: "
+              << sqlite3_errmsg(db_) << '\n';
+    return false;
+  }
+
+  return true;
+}
+
+bool SqliteVectorDB::import_chunk_state_snapshot(const std::string& snapshot_path) {
+  if (!db_ || snapshot_path.empty()) return false;
+
+  std::ifstream in(snapshot_path);
+  if (!in) {
+    std::cerr << "[SqliteVectorDB] Failed to open snapshot for reading: "
+              << snapshot_path << '\n';
+    return false;
+  }
+
+  std::string line;
+  if (!std::getline(in, line) || line != "STATE_SNAPSHOT_V1") {
+    std::cerr << "[SqliteVectorDB] Invalid snapshot header in: "
+              << snapshot_path << '\n';
+    return false;
+  }
+
+  char* err = nullptr;
+  if (sqlite3_exec(db_, "BEGIN TRANSACTION;", nullptr, nullptr, &err) != SQLITE_OK) {
+    if (err) sqlite3_free(err);
+    return false;
+  }
+
+  if (sqlite3_exec(db_, "DELETE FROM chunk_state_transitions; DELETE FROM chunk_states;",
+                   nullptr, nullptr, &err) != SQLITE_OK) {
+    if (err) sqlite3_free(err);
+    sqlite3_exec(db_, "ROLLBACK;", nullptr, nullptr, nullptr);
+    return false;
+  }
+  if (err) {
+    sqlite3_free(err);
+    err = nullptr;
+  }
+
+  sqlite3_stmt* state_stmt = nullptr;
+  sqlite3_stmt* transition_stmt = nullptr;
+  int rc = sqlite3_prepare_v2(
+      db_,
+      "INSERT INTO chunk_states "
+      "(id, tier, last_transition_reason, last_transition_at_unix_ms) "
+      "VALUES (?, ?, ?, ?);",
+      -1, &state_stmt, nullptr);
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_prepare_v2(
+        db_,
+        "INSERT INTO chunk_state_transitions "
+        "(event_id, id, from_tier, to_tier, reason, created_at_unix_ms) "
+        "VALUES (?, ?, ?, ?, ?, ?);",
+        -1, &transition_stmt, nullptr);
+  }
+  if (rc != SQLITE_OK) {
+    if (state_stmt) sqlite3_finalize(state_stmt);
+    if (transition_stmt) sqlite3_finalize(transition_stmt);
+    sqlite3_exec(db_, "ROLLBACK;", nullptr, nullptr, nullptr);
+    return false;
+  }
+
+  sqlite3_int64 max_transition_event_id = 0;
+  while (std::getline(in, line)) {
+    if (line.empty()) {
+      continue;
+    }
+
+    const auto fields = split_tab_fields(line);
+    if (fields.empty()) {
+      continue;
+    }
+
+    if (fields[0] == "STATE") {
+      if (fields.size() != 5) {
+        sqlite3_finalize(state_stmt);
+        sqlite3_finalize(transition_stmt);
+        sqlite3_exec(db_, "ROLLBACK;", nullptr, nullptr, nullptr);
+        return false;
+      }
+
+      rc = sqlite3_bind_int64(state_stmt, 1, static_cast<sqlite3_int64>(std::stoll(fields[1])));
+      rc = (rc == SQLITE_OK)
+               ? sqlite3_bind_text(state_stmt, 2, fields[2].c_str(), -1, SQLITE_TRANSIENT)
+               : rc;
+      rc = (rc == SQLITE_OK)
+               ? sqlite3_bind_text(state_stmt, 3, fields[3].c_str(), -1, SQLITE_TRANSIENT)
+               : rc;
+      rc = (rc == SQLITE_OK)
+               ? sqlite3_bind_int64(state_stmt, 4,
+                                    static_cast<sqlite3_int64>(std::stoll(fields[4])))
+               : rc;
+      if (rc != SQLITE_OK || sqlite3_step(state_stmt) != SQLITE_DONE) {
+        sqlite3_finalize(state_stmt);
+        sqlite3_finalize(transition_stmt);
+        sqlite3_exec(db_, "ROLLBACK;", nullptr, nullptr, nullptr);
+        return false;
+      }
+      sqlite3_reset(state_stmt);
+      sqlite3_clear_bindings(state_stmt);
+      continue;
+    }
+
+    if (fields[0] == "TRANSITION") {
+      if (fields.size() != 7) {
+        sqlite3_finalize(state_stmt);
+        sqlite3_finalize(transition_stmt);
+        sqlite3_exec(db_, "ROLLBACK;", nullptr, nullptr, nullptr);
+        return false;
+      }
+
+      const sqlite3_int64 event_id = static_cast<sqlite3_int64>(std::stoll(fields[1]));
+      max_transition_event_id = std::max(max_transition_event_id, event_id);
+      rc = sqlite3_bind_int64(
+          transition_stmt, 1, event_id);
+      rc = (rc == SQLITE_OK)
+               ? sqlite3_bind_int64(
+                     transition_stmt, 2, static_cast<sqlite3_int64>(std::stoll(fields[2])))
+               : rc;
+      rc = (rc == SQLITE_OK)
+               ? sqlite3_bind_text(
+                     transition_stmt, 3, fields[3].c_str(), -1, SQLITE_TRANSIENT)
+               : rc;
+      rc = (rc == SQLITE_OK)
+               ? sqlite3_bind_text(
+                     transition_stmt, 4, fields[4].c_str(), -1, SQLITE_TRANSIENT)
+               : rc;
+      rc = (rc == SQLITE_OK)
+               ? sqlite3_bind_text(
+                     transition_stmt, 5, fields[5].c_str(), -1, SQLITE_TRANSIENT)
+               : rc;
+      rc = (rc == SQLITE_OK)
+               ? sqlite3_bind_int64(
+                     transition_stmt, 6, static_cast<sqlite3_int64>(std::stoll(fields[6])))
+               : rc;
+      if (rc != SQLITE_OK || sqlite3_step(transition_stmt) != SQLITE_DONE) {
+        sqlite3_finalize(state_stmt);
+        sqlite3_finalize(transition_stmt);
+        sqlite3_exec(db_, "ROLLBACK;", nullptr, nullptr, nullptr);
+        return false;
+      }
+      sqlite3_reset(transition_stmt);
+      sqlite3_clear_bindings(transition_stmt);
+      continue;
+    }
+
+    sqlite3_finalize(state_stmt);
+    sqlite3_finalize(transition_stmt);
+    sqlite3_exec(db_, "ROLLBACK;", nullptr, nullptr, nullptr);
+    return false;
+  }
+
+  sqlite3_finalize(state_stmt);
+  sqlite3_finalize(transition_stmt);
+
+  if (sqlite3_exec(
+          db_, "DELETE FROM sqlite_sequence WHERE name = 'chunk_state_transitions';",
+          nullptr, nullptr, &err) != SQLITE_OK) {
+    const std::string error_message = err ? err : "";
+    if (err) sqlite3_free(err);
+    err = nullptr;
+    if (error_message.find("no such table: sqlite_sequence") == std::string::npos) {
+      sqlite3_exec(db_, "ROLLBACK;", nullptr, nullptr, nullptr);
+      return false;
+    }
+  }
+  if (err) {
+    sqlite3_free(err);
+    err = nullptr;
+  }
+
+  if (max_transition_event_id > 0) {
+    sqlite3_stmt* sequence_stmt = nullptr;
+    rc = sqlite3_prepare_v2(
+        db_,
+        "INSERT OR REPLACE INTO sqlite_sequence(name, seq) "
+        "VALUES('chunk_state_transitions', ?);",
+        -1, &sequence_stmt, nullptr);
+    if (rc != SQLITE_OK) {
+      const std::string error_message = sqlite3_errmsg(db_);
+      sqlite3_finalize(sequence_stmt);
+      if (error_message.find("no such table: sqlite_sequence") == std::string::npos) {
+        sqlite3_exec(db_, "ROLLBACK;", nullptr, nullptr, nullptr);
+        return false;
+      }
+    } else {
+      rc = sqlite3_bind_int64(sequence_stmt, 1, max_transition_event_id);
+      if (rc != SQLITE_OK || sqlite3_step(sequence_stmt) != SQLITE_DONE) {
+        sqlite3_finalize(sequence_stmt);
+        sqlite3_exec(db_, "ROLLBACK;", nullptr, nullptr, nullptr);
+        return false;
+      }
+      sqlite3_finalize(sequence_stmt);
+    }
+  }
+
+  if (sqlite3_exec(db_, "COMMIT;", nullptr, nullptr, &err) != SQLITE_OK) {
+    if (err) sqlite3_free(err);
+    return false;
+  }
+  if (err) sqlite3_free(err);
+  return true;
 }
 
 }  // namespace mobile_rag

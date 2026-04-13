@@ -87,6 +87,10 @@ bool CommandLineArgs::parse_options() {
       }
     } else if (arg == "--output" && i + 1 < argc_) {
       config_.output_file = argv_[++i];
+    } else if (arg == "--state-snapshot-in" && i + 1 < argc_) {
+      config_.state_snapshot_in_path = argv_[++i];
+    } else if (arg == "--state-snapshot-out" && i + 1 < argc_) {
+      config_.state_snapshot_out_path = argv_[++i];
     } else if (arg == "--top-k" && i + 1 < argc_) {
       config_.top_k = std::stoi(argv_[++i]);
     } else if (arg == "--threads" && i + 1 < argc_) {
@@ -258,6 +262,13 @@ bool CommandLineArgs::validate_config() {
     return false;
   }
 
+  if (!config_.state_snapshot_in_path.empty() &&
+      !std::filesystem::exists(config_.state_snapshot_in_path)) {
+    std::cerr << "Error: state snapshot path not found: "
+              << config_.state_snapshot_in_path << '\n';
+    return false;
+  }
+
   if (config_.top_k <= 0) {
     std::cerr << "Error: --top-k must be positive\n";
     return false;
@@ -355,6 +366,8 @@ void CommandLineArgs::print_help() const {
             << "  --index-path <path>          Path to save/load Faiss index (default: ./faiss_index.bin)\n"
             << "  --data-source <txt|dataset>  Choose loader mode (default: txt)\n"
             << "  --output <file>              Output file for results\n"
+            << "  --state-snapshot-in <path>   Restore chunk-state snapshot before execution\n"
+            << "  --state-snapshot-out <path>  Export chunk-state snapshot after execution\n"
             << "  --top-k <num>                Number of documents to retrieve (default: 5)\n"
             << "  --threads <num>              Number of threads (default: 4)\n"
             << "  --max-new-tokens <num>       Maximum generated tokens (default: 256)\n"

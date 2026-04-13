@@ -66,10 +66,12 @@ void test_query_parses_semantic_hash_prefilter_flags() {
   const std::filesystem::path scratch_dir = "/tmp/native_rag_cli_flags";
   const auto llm_path = scratch_dir / "dummy-model.gguf";
   const auto embedding_path = scratch_dir / "dummy-embedding.json";
+  const auto snapshot_in_path = scratch_dir / "state-in.snapshot.tsv";
 
   std::filesystem::create_directories(scratch_dir);
   std::ofstream(llm_path.string()).put('\n');
   std::ofstream(embedding_path.string()).put('\n');
+  std::ofstream(snapshot_in_path.string()) << "STATE_SNAPSHOT_V1\n";
 
   std::vector<std::string> args = {
       "mobile_rag",
@@ -88,6 +90,10 @@ void test_query_parses_semantic_hash_prefilter_flags() {
       "--semantic-hash-max-distance",
       "12",
       "--adaptive-graph",
+      "--state-snapshot-in",
+      snapshot_in_path.string(),
+      "--state-snapshot-out",
+      "/tmp/out.snapshot.tsv",
   };
 
   std::vector<char*> argv;
@@ -107,9 +113,12 @@ void test_query_parses_semantic_hash_prefilter_flags() {
   assert(config.semantic_hash_candidate_limit == 24);
   assert(config.semantic_hash_max_distance == 12);
   assert(config.adaptive_graph);
+  assert(config.state_snapshot_in_path == snapshot_in_path.string());
+  assert(config.state_snapshot_out_path == "/tmp/out.snapshot.tsv");
 
   std::filesystem::remove(llm_path);
   std::filesystem::remove(embedding_path);
+  std::filesystem::remove(snapshot_in_path);
   std::filesystem::remove(scratch_dir);
 }
 

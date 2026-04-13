@@ -72,6 +72,12 @@ int main(int argc, char** argv) {
               << config.semantic_hash_max_distance << '\n'
               << "  Adaptive Graph: "
               << (config.adaptive_graph ? "enabled" : "disabled") << '\n'
+              << "  State Snapshot In: "
+              << (config.state_snapshot_in_path.empty() ? "(none)"
+                                                        : config.state_snapshot_in_path) << '\n'
+              << "  State Snapshot Out: "
+              << (config.state_snapshot_out_path.empty() ? "(none)"
+                                                         : config.state_snapshot_out_path) << '\n'
               << "  Chunk Size: " << config.chunk_size << '\n'
               << "  Chunk Overlap: " << config.chunk_overlap << '\n';
   }
@@ -147,6 +153,16 @@ int main(int argc, char** argv) {
       std::cout << "✓ Index built from: " << config.input_file << '\n';
     }
 
+    if (!config.state_snapshot_in_path.empty()) {
+      if (!sqlite_db->import_chunk_state_snapshot(config.state_snapshot_in_path)) {
+        std::cerr << "[ERROR] Failed to import state snapshot: "
+                  << config.state_snapshot_in_path << '\n';
+        return 1;
+      }
+      std::cout << "✓ State snapshot imported from: "
+                << config.state_snapshot_in_path << '\n';
+    }
+
     // Save index to disk
     if (config.save_index) {
       if (config.verbose) {
@@ -157,6 +173,16 @@ int main(int argc, char** argv) {
         return 1;
       }
       std::cout << "✓ Index saved to: " << config.index_path << '\n';
+    }
+
+    if (!config.state_snapshot_out_path.empty()) {
+      if (!sqlite_db->export_chunk_state_snapshot(config.state_snapshot_out_path)) {
+        std::cerr << "[ERROR] Failed to export state snapshot: "
+                  << config.state_snapshot_out_path << '\n';
+        return 1;
+      }
+      std::cout << "✓ State snapshot exported to: "
+                << config.state_snapshot_out_path << '\n';
     }
     return 0;
 
@@ -227,12 +253,32 @@ int main(int argc, char** argv) {
       std::cout << "✓ Index loaded from: " << config.index_path << '\n';
     }
 
+    if (!config.state_snapshot_in_path.empty()) {
+      if (!sqlite_db->import_chunk_state_snapshot(config.state_snapshot_in_path)) {
+        std::cerr << "[ERROR] Failed to import state snapshot: "
+                  << config.state_snapshot_in_path << '\n';
+        return 1;
+      }
+      std::cout << "✓ State snapshot imported from: "
+                << config.state_snapshot_in_path << '\n';
+    }
+
     // Step 4-7: Query embedding, search, context retrieval, and LLM inference
     if (config.verbose) {
       std::cout << "[INFO] Processing query: " << config.query << '\n';
     }
     std::string answer = pipeline.answer_query(config.query);
     std::cout << answer << '\n';
+
+    if (!config.state_snapshot_out_path.empty()) {
+      if (!sqlite_db->export_chunk_state_snapshot(config.state_snapshot_out_path)) {
+        std::cerr << "[ERROR] Failed to export state snapshot: "
+                  << config.state_snapshot_out_path << '\n';
+        return 1;
+      }
+      std::cout << "✓ State snapshot exported to: "
+                << config.state_snapshot_out_path << '\n';
+    }
     return 0;
 
   } else if (config.command == CommandLineArgs::Command::INTERACTIVE) {
@@ -301,6 +347,16 @@ int main(int argc, char** argv) {
       std::cout << "✓ Index loaded from: " << config.index_path << '\n';
     }
 
+    if (!config.state_snapshot_in_path.empty()) {
+      if (!sqlite_db->import_chunk_state_snapshot(config.state_snapshot_in_path)) {
+        std::cerr << "[ERROR] Failed to import state snapshot: "
+                  << config.state_snapshot_in_path << '\n';
+        return 1;
+      }
+      std::cout << "✓ State snapshot imported from: "
+                << config.state_snapshot_in_path << '\n';
+    }
+
     std::cout << "Type 'help' for commands, 'exit' to quit\n\n";
 
     std::string input;
@@ -320,6 +376,16 @@ int main(int argc, char** argv) {
         std::string answer = pipeline.answer_query(input);
         std::cout << answer << "\n\n";
       }
+    }
+
+    if (!config.state_snapshot_out_path.empty()) {
+      if (!sqlite_db->export_chunk_state_snapshot(config.state_snapshot_out_path)) {
+        std::cerr << "[ERROR] Failed to export state snapshot: "
+                  << config.state_snapshot_out_path << '\n';
+        return 1;
+      }
+      std::cout << "✓ State snapshot exported to: "
+                << config.state_snapshot_out_path << '\n';
     }
     return 0;
   }

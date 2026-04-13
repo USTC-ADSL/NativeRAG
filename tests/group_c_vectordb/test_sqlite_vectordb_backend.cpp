@@ -1,5 +1,6 @@
 #include <cassert>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -14,6 +15,18 @@ std::string test_db_path() {
   return "/tmp/native_rag_sqlite_vectordb_backend.db";
 }
 
+std::string snapshot_path() {
+  return "/tmp/native_rag_sqlite_vectordb_backend.snapshot.tsv";
+}
+
+std::string warm_snapshot_path() {
+  return "/tmp/native_rag_sqlite_vectordb_backend.warm.snapshot.tsv";
+}
+
+std::string replay_snapshot_path() {
+  return "/tmp/native_rag_sqlite_vectordb_backend.replay.snapshot.tsv";
+}
+
 void assert_top_result(const std::vector<std::pair<int64_t, float>>& results,
                        int64_t expected_id) {
   assert(!results.empty());
@@ -24,7 +37,13 @@ void assert_top_result(const std::vector<std::pair<int64_t, float>>& results,
 
 int main() {
   const std::string db_path = test_db_path();
+  const std::string snapshot = snapshot_path();
+  const std::string warm_snapshot = warm_snapshot_path();
+  const std::string replay_snapshot = replay_snapshot_path();
   std::filesystem::remove(db_path);
+  std::filesystem::remove(snapshot);
+  std::filesystem::remove(warm_snapshot);
+  std::filesystem::remove(replay_snapshot);
 
   {
     SqliteVectorDB db(db_path);
@@ -52,6 +71,7 @@ int main() {
     assert(db.get_text_for_id(30) == "alpha-ish");
     assert(db.get_chunk_state(10) == "warm");
     assert(db.count_chunk_state_transitions(10) == 1);
+    assert(db.export_chunk_state_snapshot(warm_snapshot));
 
     const auto beta_results = db.search({0.0f, 1.0f, 0.0f}, 1);
     assert(beta_results.size() == 1);
@@ -83,6 +103,7 @@ int main() {
     assert(reopened.update_chunk_state(10, ChunkState::COLD, "manual_demotion"));
     assert(reopened.get_chunk_state(10) == "cold");
     assert(reopened.count_chunk_state_transitions(10) == 3);
+    assert(reopened.export_chunk_state_snapshot(snapshot));
   }
 
   {
@@ -104,7 +125,35 @@ int main() {
     assert(repaired_lexical[1].first == 30);
   }
 
+  {
+    const std::string restored_db_path = "/tmp/native_rag_sqlite_vectordb_backend_restored.db";
+    std::filesystem::remove(restored_db_path);
+    SqliteVectorDB restored(restored_db_path);
+    assert(restored.import_chunk_state_snapshot(snapshot));
+    assert(restored.get_chunk_state(10) == "cold");
+    assert(restored.get_chunk_state(20) == "warm");
+    assert(restored.count_chunk_state_transitions(10) == 3);
+    assert(restored.count_chunk_state_transitions(20) == 1);
+    std::filesystem::remove(restored_db_path);
+  }
+
+  {
+    SqliteVectorDB replayed(db_path);
+    assert(replayed.import_chunk_state_snapshot(warm_snapshot));
+    assert(replayed.update_chunk_state(10, ChunkState::HOT, "replayed_hit"));
+    assert(replayed.export_chunk_state_snapshot(replay_snapshot));
+
+    std::ifstream snapshot_stream(replay_snapshot);
+    std::string contents((std::istreambuf_iterator<char>(snapshot_stream)),
+                         std::istreambuf_iterator<char>());
+    assert(contents.find("TRANSITION\t4\t10\twarm\thot\treplayed_hit\t") !=
+           std::string::npos);
+  }
+
   std::filesystem::remove(db_path);
+  std::filesystem::remove(snapshot);
+  std::filesystem::remove(warm_snapshot);
+  std::filesystem::remove(replay_snapshot);
   std::cout << "SqliteVectorDB backend test passed\n";
   return 0;
 }

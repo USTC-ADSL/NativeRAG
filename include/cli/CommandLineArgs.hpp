@@ -47,6 +47,8 @@ class CommandLineArgs {
     std::string input_file;
     std::string query;
     std::string output_file;
+    std::string state_snapshot_in_path;
+    std::string state_snapshot_out_path;
 
     // Performance
     int num_threads = 4;
