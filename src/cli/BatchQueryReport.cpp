@@ -1,5 +1,6 @@
 #include "cli/BatchQueryReport.hpp"
 
+#include <algorithm>
 #include <fstream>
 #include <iomanip>
 #include <sstream>
@@ -71,6 +72,10 @@ void BatchQueryReport::record(const RAGPipeline::QueryTrace& trace) {
   if (trace.escalated) {
     ++escalation_count_;
   }
+  if (!has_runtime_metadata_) {
+    runtime_metadata_ = trace.runtime;
+    has_runtime_metadata_ = true;
+  }
 
   promoted_to_hot_total_ += trace.promoted_to_hot;
   demoted_to_warm_total_ += trace.demoted_to_warm;
@@ -80,6 +85,15 @@ void BatchQueryReport::record(const RAGPipeline::QueryTrace& trace) {
   lexical_candidate_count_sum_ += static_cast<double>(trace.lexical_candidate_count);
   hash_candidate_count_sum_ += static_cast<double>(trace.hash_candidate_count);
   dense_result_count_sum_ += static_cast<double>(trace.dense_result_count);
+  query_embedding_ms_sum_ += trace.timing.query_embedding_ms;
+  retrieval_ms_sum_ += trace.timing.retrieval_ms;
+  evidence_ms_sum_ += trace.timing.evidence_ms;
+  state_update_ms_sum_ += trace.timing.state_update_ms;
+  prompt_build_ms_sum_ += trace.timing.prompt_build_ms;
+  generation_ms_sum_ += trace.timing.generation_ms;
+  total_ms_sum_ += trace.timing.total_ms;
+  peak_rss_kb_sum_ += static_cast<double>(trace.system.peak_rss_kb);
+  max_peak_rss_kb_ = std::max(max_peak_rss_kb_, trace.system.peak_rss_kb);
   ++initial_graph_counts_[trace.initial_graph];
   ++final_graph_counts_[trace.final_graph];
   ++fallback_reason_counts_[trace.fallback_reason];
@@ -100,7 +114,20 @@ bool BatchQueryReport::export_json(const std::string& output_path) const {
   std::ostringstream json;
   json << "{\n"
        << "  \"query_count\": " << query_count_ << ",\n"
-       << "  \"escalation_count\": " << escalation_count_ << ",\n";
+       << "  \"escalation_count\": " << escalation_count_ << ",\n"
+       << "  \"runtime\": {\n"
+       << "    \"llm_backend\": \"" << json_escape(runtime_metadata_.llm_backend) << "\",\n"
+       << "    \"embedding_backend\": \"" << json_escape(runtime_metadata_.embedding_backend) << "\",\n"
+       << "    \"llm_model_path\": \"" << json_escape(runtime_metadata_.llm_model_path) << "\",\n"
+       << "    \"embedding_model_path\": \"" << json_escape(runtime_metadata_.embedding_model_path) << "\",\n"
+       << "    \"sqlite_db_path\": \"" << json_escape(runtime_metadata_.sqlite_db_path) << "\",\n"
+       << "    \"index_path\": \"" << json_escape(runtime_metadata_.index_path) << "\",\n"
+       << "    \"query_source\": \"" << json_escape(runtime_metadata_.query_source) << "\",\n"
+       << "    \"num_threads\": " << runtime_metadata_.num_threads << ",\n"
+       << "    \"max_new_tokens\": " << runtime_metadata_.max_new_tokens << ",\n"
+       << "    \"sqlite_db_size_bytes\": " << runtime_metadata_.sqlite_db_size_bytes << ",\n"
+       << "    \"index_size_bytes\": " << runtime_metadata_.index_size_bytes << "\n"
+       << "  },\n";
   write_count_map(json, "initial_graph_counts", initial_graph_counts_);
   json << ",\n";
   write_count_map(json, "final_graph_counts", final_graph_counts_);
@@ -109,7 +136,10 @@ bool BatchQueryReport::export_json(const std::string& output_path) const {
   json << ",\n"
        << "  \"totals\": {\n"
        << "    \"promoted_to_hot\": " << promoted_to_hot_total_ << ",\n"
-       << "    \"demoted_to_warm\": " << demoted_to_warm_total_ << "\n"
+        << "    \"demoted_to_warm\": " << demoted_to_warm_total_ << "\n"
+       << "  },\n"
+       << "  \"maxima\": {\n"
+       << "    \"max_peak_rss_kb\": " << max_peak_rss_kb_ << "\n"
        << "  },\n"
        << "  \"averages\": {\n"
        << "    \"top_score\": " << (top_score_sum_ / query_count) << ",\n"
@@ -117,7 +147,15 @@ bool BatchQueryReport::export_json(const std::string& output_path) const {
        << "    \"coverage_ratio\": " << (coverage_ratio_sum_ / query_count) << ",\n"
        << "    \"lexical_candidate_count\": " << (lexical_candidate_count_sum_ / query_count) << ",\n"
        << "    \"hash_candidate_count\": " << (hash_candidate_count_sum_ / query_count) << ",\n"
-       << "    \"dense_result_count\": " << (dense_result_count_sum_ / query_count) << "\n"
+       << "    \"dense_result_count\": " << (dense_result_count_sum_ / query_count) << ",\n"
+       << "    \"query_embedding_ms\": " << (query_embedding_ms_sum_ / query_count) << ",\n"
+       << "    \"retrieval_ms\": " << (retrieval_ms_sum_ / query_count) << ",\n"
+       << "    \"evidence_ms\": " << (evidence_ms_sum_ / query_count) << ",\n"
+       << "    \"state_update_ms\": " << (state_update_ms_sum_ / query_count) << ",\n"
+       << "    \"prompt_build_ms\": " << (prompt_build_ms_sum_ / query_count) << ",\n"
+       << "    \"generation_ms\": " << (generation_ms_sum_ / query_count) << ",\n"
+       << "    \"total_ms\": " << (total_ms_sum_ / query_count) << ",\n"
+       << "    \"peak_rss_kb\": " << (peak_rss_kb_sum_ / query_count) << "\n"
        << "  }\n"
        << "}\n";
 

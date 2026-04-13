@@ -35,6 +35,34 @@ class RAGPipeline {
     std::string preview;
   };
 
+  struct QueryTiming {
+    double query_embedding_ms = 0.0;
+    double retrieval_ms = 0.0;
+    double evidence_ms = 0.0;
+    double state_update_ms = 0.0;
+    double prompt_build_ms = 0.0;
+    double generation_ms = 0.0;
+    double total_ms = 0.0;
+  };
+
+  struct QuerySystemMetrics {
+    uint64_t peak_rss_kb = 0;
+  };
+
+  struct TraceRuntimeMetadata {
+    std::string llm_backend;
+    std::string embedding_backend;
+    std::string llm_model_path;
+    std::string embedding_model_path;
+    std::string sqlite_db_path;
+    std::string index_path;
+    std::string query_source = "inline";
+    int num_threads = 0;
+    int max_new_tokens = 0;
+    uint64_t sqlite_db_size_bytes = 0;
+    uint64_t index_size_bytes = 0;
+  };
+
   struct QueryTrace {
     std::string query;
     std::string answer;
@@ -62,6 +90,9 @@ class RAGPipeline {
     int demoted_to_warm = 0;
     ChunkStateSummary index_state;
     EvidenceFeatures evidence;
+    QueryTiming timing;
+    QuerySystemMetrics system;
+    TraceRuntimeMetadata runtime;
     std::vector<QueryTraceResult> results;
   };
 
@@ -107,6 +138,7 @@ class RAGPipeline {
   void set_semantic_hash_prefilter(SemanticHashPrefilterConfig config);
   void set_lexical_prefilter(LexicalPrefilterConfig config);
   void set_graph_selector_config(GraphSelector::Config config);
+  void set_trace_runtime_metadata(TraceRuntimeMetadata metadata);
 
  protected:
   bool add_text_embeddings(const std::vector<std::string>& texts,
@@ -127,6 +159,7 @@ class RAGPipeline {
   SemanticHashPrefilterConfig semantic_hash_prefilter_;
   LexicalPrefilterConfig lexical_prefilter_;
   GraphSelector graph_selector_;
+  TraceRuntimeMetadata trace_runtime_metadata_;
   QueryTrace last_query_trace_;
   bool has_last_query_trace_ = false;
 };

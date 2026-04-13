@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <iomanip>
+#include <filesystem>
 
 #include "RAGPipelineWithDataset.hpp"
 #include "cli/BatchQueryReport.hpp"
@@ -32,6 +33,20 @@ const char* current_llm_backend_name() {
 
 const char* current_embedding_backend_name() {
   return "MNN";
+}
+
+uint64_t file_size_or_zero(const std::string& path) {
+  if (path.empty()) {
+    return 0;
+  }
+
+  std::error_code error_code;
+  if (!std::filesystem::exists(path, error_code) ||
+      !std::filesystem::is_regular_file(path, error_code)) {
+    return 0;
+  }
+
+  return static_cast<uint64_t>(std::filesystem::file_size(path, error_code));
 }
 
 }  // namespace
@@ -257,6 +272,20 @@ int main(int argc, char** argv) {
     RAGPipelineWithDataset pipeline(nullptr, embedder, index, llm, sqlite_db,
                                     config.top_k, config.chunk_size,
                                     config.chunk_overlap);
+    RAGPipeline::TraceRuntimeMetadata trace_runtime_metadata;
+    trace_runtime_metadata.llm_backend = current_llm_backend_name();
+    trace_runtime_metadata.embedding_backend = current_embedding_backend_name();
+    trace_runtime_metadata.llm_model_path = config.llm_model_path;
+    trace_runtime_metadata.embedding_model_path = config.embedding_model_path;
+    trace_runtime_metadata.sqlite_db_path = config.sqlite_db_path;
+    trace_runtime_metadata.index_path = config.index_path;
+    trace_runtime_metadata.query_source =
+        config.query_file_path.empty() ? "inline" : "query_file";
+    trace_runtime_metadata.num_threads = config.num_threads;
+    trace_runtime_metadata.max_new_tokens = config.max_new_tokens;
+    trace_runtime_metadata.sqlite_db_size_bytes = file_size_or_zero(config.sqlite_db_path);
+    trace_runtime_metadata.index_size_bytes = file_size_or_zero(config.index_path);
+    pipeline.set_trace_runtime_metadata(trace_runtime_metadata);
     BatchQueryReport batch_report;
     GraphSelector::Config graph_selector_config;
     graph_selector_config.enabled = config.adaptive_graph;

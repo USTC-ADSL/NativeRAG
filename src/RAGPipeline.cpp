@@ -2,11 +2,13 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
+#include <sys/resource.h>
 #include <unordered_set>
 
 #include "controller/EvidenceFeatures.hpp"
@@ -167,6 +169,24 @@ std::string csv_escape(const std::string& input) {
   return escaped;
 }
 
+template <typename ClockT>
+double elapsed_ms_since(const std::chrono::time_point<ClockT>& start) {
+  return std::chrono::duration<double, std::milli>(ClockT::now() - start).count();
+}
+
+uint64_t current_peak_rss_kb() {
+  struct rusage usage {};
+  if (getrusage(RUSAGE_SELF, &usage) != 0) {
+    return 0;
+  }
+
+  if (usage.ru_maxrss < 0) {
+    return 0;
+  }
+
+  return static_cast<uint64_t>(usage.ru_maxrss);
+}
+
 std::string serialize_query_trace_json(const RAGPipeline::QueryTrace& trace, bool pretty) {
   const std::string newline = pretty ? "\n" : "";
   const std::string colon = pretty ? ": " : ":";
@@ -206,6 +226,31 @@ std::string serialize_query_trace_json(const RAGPipeline::QueryTrace& trace, boo
       << indent(1) << "\"fallback_reason\"" << colon << "\"" << json_escape(trace.fallback_reason) << "\"," << newline
       << indent(1) << "\"promoted_to_hot\"" << colon << trace.promoted_to_hot << "," << newline
       << indent(1) << "\"demoted_to_warm\"" << colon << trace.demoted_to_warm << "," << newline
+      << indent(1) << "\"timings\"" << colon << "{" << newline
+      << indent(2) << "\"query_embedding_ms\"" << colon << trace.timing.query_embedding_ms << "," << newline
+      << indent(2) << "\"retrieval_ms\"" << colon << trace.timing.retrieval_ms << "," << newline
+      << indent(2) << "\"evidence_ms\"" << colon << trace.timing.evidence_ms << "," << newline
+      << indent(2) << "\"state_update_ms\"" << colon << trace.timing.state_update_ms << "," << newline
+      << indent(2) << "\"prompt_build_ms\"" << colon << trace.timing.prompt_build_ms << "," << newline
+      << indent(2) << "\"generation_ms\"" << colon << trace.timing.generation_ms << "," << newline
+      << indent(2) << "\"total_ms\"" << colon << trace.timing.total_ms << newline
+      << indent(1) << "}," << newline
+      << indent(1) << "\"system\"" << colon << "{" << newline
+      << indent(2) << "\"peak_rss_kb\"" << colon << trace.system.peak_rss_kb << newline
+      << indent(1) << "}," << newline
+      << indent(1) << "\"runtime\"" << colon << "{" << newline
+      << indent(2) << "\"llm_backend\"" << colon << "\"" << json_escape(trace.runtime.llm_backend) << "\"," << newline
+      << indent(2) << "\"embedding_backend\"" << colon << "\"" << json_escape(trace.runtime.embedding_backend) << "\"," << newline
+      << indent(2) << "\"llm_model_path\"" << colon << "\"" << json_escape(trace.runtime.llm_model_path) << "\"," << newline
+      << indent(2) << "\"embedding_model_path\"" << colon << "\"" << json_escape(trace.runtime.embedding_model_path) << "\"," << newline
+      << indent(2) << "\"sqlite_db_path\"" << colon << "\"" << json_escape(trace.runtime.sqlite_db_path) << "\"," << newline
+      << indent(2) << "\"index_path\"" << colon << "\"" << json_escape(trace.runtime.index_path) << "\"," << newline
+      << indent(2) << "\"query_source\"" << colon << "\"" << json_escape(trace.runtime.query_source) << "\"," << newline
+      << indent(2) << "\"num_threads\"" << colon << trace.runtime.num_threads << "," << newline
+      << indent(2) << "\"max_new_tokens\"" << colon << trace.runtime.max_new_tokens << "," << newline
+      << indent(2) << "\"sqlite_db_size_bytes\"" << colon << trace.runtime.sqlite_db_size_bytes << "," << newline
+      << indent(2) << "\"index_size_bytes\"" << colon << trace.runtime.index_size_bytes << newline
+      << indent(1) << "}," << newline
       << indent(1) << "\"index_state\"" << colon << "{" << newline
       << indent(2) << "\"hot\"" << colon << trace.index_state.hot_count << "," << newline
       << indent(2) << "\"warm\"" << colon << trace.index_state.warm_count << "," << newline
@@ -308,6 +353,10 @@ void RAGPipeline::set_graph_selector_config(GraphSelector::Config config) {
   graph_selector_.set_config(config);
 }
 
+void RAGPipeline::set_trace_runtime_metadata(TraceRuntimeMetadata metadata) {
+  trace_runtime_metadata_ = std::move(metadata);
+}
+
 bool RAGPipeline::export_last_query_trace(const std::string& output_path) const {
   if (!has_last_query_trace_ || output_path.empty()) {
     return false;
@@ -357,6 +406,9 @@ bool RAGPipeline::append_last_query_trace_summary_csv(const std::string& output_
         << "fallback_reason,promoted_to_hot,demoted_to_warm,hot,warm,cold,"
         << "transition_count,top_score,second_score,score_margin,score_sharpness,"
         << "retrieved_chunk_count,query_term_count,covered_query_terms,coverage_ratio,"
+        << "query_embedding_ms,retrieval_ms,evidence_ms,state_update_ms,prompt_build_ms,"
+        << "generation_ms,total_ms,peak_rss_kb,llm_backend,embedding_backend,query_source,"
+        << "num_threads,max_new_tokens,sqlite_db_size_bytes,index_size_bytes,"
         << "top_result_id,top_result_score\n";
   }
 
@@ -397,6 +449,21 @@ bool RAGPipeline::append_last_query_trace_summary_csv(const std::string& output_
       << last_query_trace_.evidence.query_term_count << ","
       << last_query_trace_.evidence.covered_query_terms << ","
       << last_query_trace_.evidence.coverage_ratio << ","
+      << last_query_trace_.timing.query_embedding_ms << ","
+      << last_query_trace_.timing.retrieval_ms << ","
+      << last_query_trace_.timing.evidence_ms << ","
+      << last_query_trace_.timing.state_update_ms << ","
+      << last_query_trace_.timing.prompt_build_ms << ","
+      << last_query_trace_.timing.generation_ms << ","
+      << last_query_trace_.timing.total_ms << ","
+      << last_query_trace_.system.peak_rss_kb << ","
+      << csv_escape(last_query_trace_.runtime.llm_backend) << ","
+      << csv_escape(last_query_trace_.runtime.embedding_backend) << ","
+      << csv_escape(last_query_trace_.runtime.query_source) << ","
+      << last_query_trace_.runtime.num_threads << ","
+      << last_query_trace_.runtime.max_new_tokens << ","
+      << last_query_trace_.runtime.sqlite_db_size_bytes << ","
+      << last_query_trace_.runtime.index_size_bytes << ","
       << top_result_id << ","
       << top_result_score << "\n";
   return static_cast<bool>(out);
@@ -587,6 +654,7 @@ bool RAGPipeline::load_index(const std::string& index_path) {
 std::string RAGPipeline::answer_query(const std::string& query) {
   last_query_trace_ = QueryTrace{};
   has_last_query_trace_ = false;
+  const auto total_start = std::chrono::steady_clock::now();
 
   if (!embedder_) {
     std::cerr << "[RAGPipeline] Embedder is not initialized." << '\n';
@@ -603,7 +671,9 @@ std::string RAGPipeline::answer_query(const std::string& query) {
     return {};
   }
 
+  const auto query_embedding_start = std::chrono::steady_clock::now();
   std::vector<float> q = embedder_->embed_query(query);
+  const double query_embedding_ms = elapsed_ms_since(query_embedding_start);
   if (q.empty()) {
     std::cerr << "[RAGPipeline] Empty embedding for query." << '\n';
     return {};
@@ -627,6 +697,8 @@ std::string RAGPipeline::answer_query(const std::string& query) {
   query_trace.adaptive_graph_enabled = graph_selector_.config().enabled;
   query_trace.budget_class = budget_class_name(budget_class);
   query_trace.top_k = top_k_;
+  query_trace.runtime = trace_runtime_metadata_;
+  query_trace.timing.query_embedding_ms = query_embedding_ms;
   query_trace.lexical_prefilter_enabled = lexical_prefilter_.enabled;
   query_trace.lexical_candidate_limit = lexical_prefilter_.candidate_limit;
   query_trace.semantic_hash_prefilter_enabled = semantic_hash_prefilter_.enabled;
@@ -734,10 +806,14 @@ std::string RAGPipeline::answer_query(const std::string& query) {
     return chunks;
   };
 
+  const auto first_retrieval_start = std::chrono::steady_clock::now();
   RetrievalExecution execution = execute_retrieval(active_graph);
+  query_trace.timing.retrieval_ms += elapsed_ms_since(first_retrieval_start);
   auto retrieved_chunks = collect_chunks(execution.results);
+  const auto first_evidence_start = std::chrono::steady_clock::now();
   auto evidence_features =
       compute_evidence_features(query, execution.results, retrieved_chunks);
+  query_trace.timing.evidence_ms += elapsed_ms_since(first_evidence_start);
 
   std::string final_controller_reason = "adaptive_disabled";
   if (graph_selector_.config().enabled) {
@@ -758,10 +834,14 @@ std::string RAGPipeline::answer_query(const std::string& query) {
                 << evidence_features.coverage_ratio
                 << " score_margin=" << evidence_features.score_margin << '\n';
       active_graph = escalation.graph;
+      const auto escalation_retrieval_start = std::chrono::steady_clock::now();
       execution = execute_retrieval(active_graph);
+      query_trace.timing.retrieval_ms += elapsed_ms_since(escalation_retrieval_start);
       retrieved_chunks = collect_chunks(execution.results);
+      const auto escalation_evidence_start = std::chrono::steady_clock::now();
       evidence_features =
           compute_evidence_features(query, execution.results, retrieved_chunks);
+      query_trace.timing.evidence_ms += elapsed_ms_since(escalation_evidence_start);
     }
     std::cout << "[CONTROLLER] final_graph=" << retrieval_graph_name(active_graph)
               << " budget=" << budget_class_name(budget_class)
@@ -804,6 +884,7 @@ std::string RAGPipeline::answer_query(const std::string& query) {
   }
 
   if (sqlite_db_) {
+    const auto state_update_start = std::chrono::steady_clock::now();
     std::vector<int64_t> retrieved_ids;
     retrieved_ids.reserve(execution.results.size());
     for (const auto& [id, /*score*/ _] : execution.results) {
@@ -831,6 +912,7 @@ std::string RAGPipeline::answer_query(const std::string& query) {
               << " cold=" << state_summary.cold_count
               << " transitions=" << state_summary.transition_count << '\n';
     query_trace.index_state = state_summary;
+    query_trace.timing.state_update_ms += elapsed_ms_since(state_update_start);
   }
 
   std::cout << "[EVIDENCE] top_score=" << std::fixed << std::setprecision(4)
@@ -844,13 +926,19 @@ std::string RAGPipeline::answer_query(const std::string& query) {
             << " retrieved_chunks=" << evidence_features.retrieved_chunk_count
             << '\n';
 
+  const auto prompt_build_start = std::chrono::steady_clock::now();
   std::string prompt = llm_->build_prompt(query, retrieved_chunks);
+  query_trace.timing.prompt_build_ms = elapsed_ms_since(prompt_build_start);
+  const auto generation_start = std::chrono::steady_clock::now();
   std::string answer = llm_->generate(prompt);
+  query_trace.timing.generation_ms = elapsed_ms_since(generation_start);
   if (answer.empty()) {
     answer = fallback_answer_from_chunks(query, retrieved_chunks);
   }
   query_trace.answer = answer;
   query_trace.evidence = evidence_features;
+  query_trace.timing.total_ms = elapsed_ms_since(total_start);
+  query_trace.system.peak_rss_kb = current_peak_rss_kb();
   last_query_trace_ = std::move(query_trace);
   has_last_query_trace_ = true;
   return answer;

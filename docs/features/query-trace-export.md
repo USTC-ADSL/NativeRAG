@@ -24,6 +24,9 @@ This patch adds explicit per-query export paths so experiments can persist the f
   - controller decision fields
   - retrieval candidate counts and fallback reason
   - evidence features
+  - query-stage timing breakdown
+  - peak RSS proxy
+  - runtime metadata snapshot
   - index-state promotion/demotion counts
   - post-query state summary
   - final ranked result IDs, scores, and previews
@@ -46,6 +49,8 @@ This patch adds explicit per-query export paths so experiments can persist the f
   - records escalation metadata when the controller upgrades the graph
   - records retrieval candidate counts, fallback reason, and final ranked results
   - records evidence and index-state summaries after query-time state transitions
+  - records query-stage timing metrics and peak RSS proxy
+  - records CLI-supplied runtime metadata snapshots
   - writes a deterministic JSON object when export is requested
 - `CommandLineArgs` now parses and validates:
   - `--query-trace-out <path>`
@@ -136,6 +141,9 @@ This patch adds a structured JSON artifact that mirrors and aggregates existing 
 - controller choice
 - retrieval candidate counts
 - evidence features
+- query-stage timing
+- peak RSS proxy
+- runtime metadata
 - index-state transition counts
 - index-state summary
 - ranked result IDs and scores
@@ -151,6 +159,7 @@ This patch also adds a flat CSV artifact intended for aggregation across many qu
 - one row per query
 - stable header
 - top-level controller/retrieval/evidence/index-state fields
+- query-stage timing and runtime metadata fields
 - top-1 result ID and score
 
 ## How to test / reproduce
@@ -188,5 +197,6 @@ This patch also adds a flat CSV artifact intended for aggregation across many qu
 - `--query-trace-out` currently supports only single `--query` runs, not interactive multi-turn sessions.
 - The JSON is written manually and intentionally stays small; it is not yet a full replay bundle.
 - JSONL and CSV now support built-in `--query-file` batch accumulation, but the CLI still does not emit a structured answer bundle for the full batch.
+- TTFT, prefill, and decode timing are still not exported separately.
 - The trace captures final query results, not intermediate candidate lists before rerank.
 - The CSV is intentionally flat and only includes the top-level summary plus top-1 result fields; it is not a full replay bundle.

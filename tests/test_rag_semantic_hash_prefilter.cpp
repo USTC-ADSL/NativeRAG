@@ -239,6 +239,19 @@ void test_adaptive_graph_logs_controller_selection() {
   auto llm = std::make_shared<FakeLLM>();
 
   TestableRAGPipeline pipeline(nullptr, embedder, index, llm, sqlite_db, 1, 128, 16);
+  mobile_rag::RAGPipeline::TraceRuntimeMetadata runtime_metadata;
+  runtime_metadata.llm_backend = "LlamaCpp";
+  runtime_metadata.embedding_backend = "MNN";
+  runtime_metadata.llm_model_path = "/tmp/fake-model.gguf";
+  runtime_metadata.embedding_model_path = "/tmp/fake-embedding.json";
+  runtime_metadata.sqlite_db_path = db_path;
+  runtime_metadata.index_path = "/tmp/fake-index.faiss";
+  runtime_metadata.query_source = "inline";
+  runtime_metadata.num_threads = 4;
+  runtime_metadata.max_new_tokens = 256;
+  runtime_metadata.sqlite_db_size_bytes = 1234;
+  runtime_metadata.index_size_bytes = 5678;
+  pipeline.set_trace_runtime_metadata(runtime_metadata);
   pipeline.set_lexical_prefilter({true, 1});
   pipeline.set_semantic_hash_prefilter({true, 1, 0});
   pipeline.set_graph_selector_config({true, 3, 0.15f, 0.50f});
@@ -291,6 +304,25 @@ void test_adaptive_graph_logs_controller_selection() {
   assert(trace.index_state.cold_count == 0);
   assert(trace.index_state.transition_count == 3);
   assert(trace.evidence.retrieved_chunk_count == 1);
+  assert(trace.timing.query_embedding_ms >= 0.0);
+  assert(trace.timing.retrieval_ms >= 0.0);
+  assert(trace.timing.evidence_ms >= 0.0);
+  assert(trace.timing.state_update_ms >= 0.0);
+  assert(trace.timing.prompt_build_ms >= 0.0);
+  assert(trace.timing.generation_ms >= 0.0);
+  assert(trace.timing.total_ms >= 0.0);
+  assert(trace.system.peak_rss_kb > 0);
+  assert(trace.runtime.llm_backend == "LlamaCpp");
+  assert(trace.runtime.embedding_backend == "MNN");
+  assert(trace.runtime.llm_model_path == "/tmp/fake-model.gguf");
+  assert(trace.runtime.embedding_model_path == "/tmp/fake-embedding.json");
+  assert(trace.runtime.sqlite_db_path == db_path);
+  assert(trace.runtime.index_path == "/tmp/fake-index.faiss");
+  assert(trace.runtime.query_source == "inline");
+  assert(trace.runtime.num_threads == 4);
+  assert(trace.runtime.max_new_tokens == 256);
+  assert(trace.runtime.sqlite_db_size_bytes == 1234);
+  assert(trace.runtime.index_size_bytes == 5678);
   assert(trace.results.size() == 1);
   assert(trace.results[0].id == 1);
   assert(trace.results[0].score > 0.0f);
@@ -312,6 +344,16 @@ void test_adaptive_graph_logs_controller_selection() {
   assert(trace_json.find("\"promoted_to_hot\": 1") != std::string::npos);
   assert(trace_json.find("\"hot\": 1") != std::string::npos);
   assert(trace_json.find("\"transition_count\": 3") != std::string::npos);
+  assert(trace_json.find("\"timings\": {") != std::string::npos);
+  assert(trace_json.find("\"query_embedding_ms\": ") != std::string::npos);
+  assert(trace_json.find("\"retrieval_ms\": ") != std::string::npos);
+  assert(trace_json.find("\"generation_ms\": ") != std::string::npos);
+  assert(trace_json.find("\"peak_rss_kb\": ") != std::string::npos);
+  assert(trace_json.find("\"runtime\": {") != std::string::npos);
+  assert(trace_json.find("\"llm_backend\": \"LlamaCpp\"") != std::string::npos);
+  assert(trace_json.find("\"query_source\": \"inline\"") != std::string::npos);
+  assert(trace_json.find("\"sqlite_db_size_bytes\": 1234") != std::string::npos);
+  assert(trace_json.find("\"index_size_bytes\": 5678") != std::string::npos);
   assert(pipeline.append_last_query_trace_jsonl(trace_jsonl_path));
 
   std::ifstream trace_jsonl_stream(trace_jsonl_path);
@@ -323,6 +365,9 @@ void test_adaptive_graph_logs_controller_selection() {
   assert(trace_jsonl.find("\"semantic_hash_candidate_limit\":1") != std::string::npos);
   assert(trace_jsonl.find("\"promoted_to_hot\":1") != std::string::npos);
   assert(trace_jsonl.find("\"transition_count\":3") != std::string::npos);
+  assert(trace_jsonl.find("\"query_embedding_ms\":") != std::string::npos);
+  assert(trace_jsonl.find("\"peak_rss_kb\":") != std::string::npos);
+  assert(trace_jsonl.find("\"llm_backend\":\"LlamaCpp\"") != std::string::npos);
   assert(trace_jsonl.find('\n') != std::string::npos);
   assert(pipeline.append_last_query_trace_summary_csv(summary_csv_path));
 
@@ -331,9 +376,13 @@ void test_adaptive_graph_logs_controller_selection() {
                           std::istreambuf_iterator<char>());
   assert(summary_csv.find("query,answer,adaptive_graph_enabled,budget_class") !=
          std::string::npos);
+  assert(summary_csv.find("query_embedding_ms,retrieval_ms,evidence_ms,state_update_ms,prompt_build_ms,generation_ms,total_ms,peak_rss_kb,llm_backend,embedding_backend,query_source,num_threads,max_new_tokens,sqlite_db_size_bytes,index_size_bytes") !=
+         std::string::npos);
   assert(summary_csv.find("sqlite metadata retrieval traces,SQLite stores metadata and traces for this project.,true,tight") !=
          std::string::npos);
   assert(summary_csv.find(",lexical_prefilter,lexical_prefilter,term_rich_query,evidence_sufficient,1,true,1,true,1,0,1,0,1,none,1,0,1,1,0,3,") !=
+         std::string::npos);
+  assert(summary_csv.find(",LlamaCpp,MNN,inline,4,256,1234,5678") !=
          std::string::npos);
 
   std::filesystem::remove(db_path);
