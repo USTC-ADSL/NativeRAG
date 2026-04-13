@@ -146,6 +146,15 @@ target_include_directories(test_prompt_utils PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
 )
 
+add_executable(test_evidence_features
+    ${CMAKE_CURRENT_SOURCE_DIR}/test_evidence_features.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/controller/EvidenceFeatures.cpp
+)
+
+target_include_directories(test_evidence_features PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+)
+
 add_executable(test_semantic_hashing
     ${CMAKE_CURRENT_SOURCE_DIR}/group_c_vectordb/test_semantic_hashing.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/vector_db/SqliteVectorDB.cpp
@@ -166,6 +175,7 @@ endif()
 add_executable(test_rag_semantic_hash_prefilter
     ${CMAKE_CURRENT_SOURCE_DIR}/test_rag_semantic_hash_prefilter.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/RAGPipeline.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/controller/EvidenceFeatures.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/vector_db/SqliteVectorDB.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/retrieval/SemanticHash.cpp
 )
@@ -193,6 +203,7 @@ endif()
 
 # Core RAG library (implementation files)
 add_library(rag_core STATIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/controller/EvidenceFeatures.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/RAGPipeline.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/retrieval/SemanticHash.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/embedding/MNNEmbedding.cpp
@@ -377,6 +388,7 @@ enable_testing()
 add_test(NAME CommandLineArgsTest COMMAND $<TARGET_FILE:test_command_line_args>)
 add_test(NAME LlamaLoggingTest COMMAND $<TARGET_FILE:test_llama_logging>)
 add_test(NAME PromptUtilsTest COMMAND $<TARGET_FILE:test_prompt_utils>)
+add_test(NAME EvidenceFeaturesTest COMMAND $<TARGET_FILE:test_evidence_features>)
 add_test(NAME SemanticHashingTest COMMAND $<TARGET_FILE:test_semantic_hashing>)
 add_test(NAME RAGSemanticHashPrefilterTest COMMAND $<TARGET_FILE:test_rag_semantic_hash_prefilter>)
 add_test(NAME SqliteVectorDBBackendTest COMMAND $<TARGET_FILE:test_sqlite_vectordb_backend>)
@@ -391,6 +403,7 @@ set_tests_properties(
     CommandLineArgsTest
     LlamaLoggingTest
     PromptUtilsTest
+    EvidenceFeaturesTest
     SemanticHashingTest
     RAGSemanticHashPrefilterTest
     SqliteVectorDBBackendTest
@@ -416,6 +429,7 @@ endif()
 
 message(STATUS "Tests configured:")
 message(STATUS "  - test_prompt_utils (generation output cleanup)")
+message(STATUS "  - test_evidence_features (evidence feature extraction)")
 message(STATUS "  - test_semantic_hashing (Group C - semantic hash)")
 message(STATUS "  - test_rag_semantic_hash_prefilter (query-time semantic hash prefilter)")
 message(STATUS "  - test_sqlite_vectordb_backend (SQLite lexical/vector backend)")

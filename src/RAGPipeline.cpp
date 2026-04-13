@@ -6,6 +6,7 @@
 #include <iomanip>
 #include <unordered_set>
 
+#include "controller/EvidenceFeatures.hpp"
 #include "llm/PromptUtils.hpp"
 #include "retrieval/SemanticHash.hpp"
 
@@ -442,6 +443,19 @@ std::string RAGPipeline::answer_query(const std::string& query) {
                 << " | (text not found)" << '\n';
     }
   }
+
+  const auto evidence_features =
+      compute_evidence_features(query, results, retrieved_chunks);
+  std::cout << "[EVIDENCE] top_score=" << std::fixed << std::setprecision(4)
+            << evidence_features.top_score
+            << " second_score=" << evidence_features.second_score
+            << " score_margin=" << evidence_features.score_margin
+            << " score_sharpness=" << evidence_features.score_sharpness
+            << " query_terms=" << evidence_features.query_term_count
+            << " covered_terms=" << evidence_features.covered_query_terms
+            << " coverage_ratio=" << evidence_features.coverage_ratio
+            << " retrieved_chunks=" << evidence_features.retrieved_chunk_count
+            << '\n';
 
   std::string prompt = llm_->build_prompt(query, retrieved_chunks);
   std::string answer = llm_->generate(prompt);
