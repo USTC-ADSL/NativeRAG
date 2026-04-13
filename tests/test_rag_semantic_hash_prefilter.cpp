@@ -169,10 +169,45 @@ void test_prefilter_falls_back_to_dense_search_when_shortlist_is_empty() {
   std::filesystem::remove(db_path);
 }
 
+void test_lexical_and_hash_shortlists_are_merged_before_dense_rerank() {
+  const std::string db_path = make_temp_db_path("merged-shortlists");
+  std::filesystem::remove(db_path);
+
+  auto sqlite_db = std::make_shared<SqliteVectorDB>(db_path);
+  auto embedder = std::make_shared<FakeEmbeddingModel>();
+  auto index = std::make_shared<FakeVectorIndex>();
+  auto llm = std::make_shared<FakeLLM>();
+
+  TestableRAGPipeline pipeline(nullptr, embedder, index, llm, sqlite_db, 1, 128, 16);
+  pipeline.set_semantic_hash_prefilter({true, 1, 0});
+  pipeline.set_lexical_prefilter({true, 1});
+
+  const std::vector<std::string> texts = {
+      "Unrelated dense chunk without sqlite keyword.",
+      "SQLite stores metadata and traces for this project.",
+  };
+  const std::vector<std::vector<float>> vectors = {
+      {1.0f, 1.0f},
+      {1.0f, -1.0f},
+  };
+  assert(pipeline.ingest(texts, vectors, "merged-prefilter-test"));
+
+  const std::string query = "sqlite metadata";
+  embedder->query_embeddings[query] = {1.0f, -1.0f};
+  index->search_results = {{0, 0.99f}};
+
+  const std::string answer = pipeline.answer_query(query);
+  assert(index->search_calls == 0);
+  assert(answer.find("SQLite stores metadata and traces for this project.") != std::string::npos);
+
+  std::filesystem::remove(db_path);
+}
+
 }  // namespace
 
 int main() {
   test_prefilter_uses_sqlite_rerank_before_dense_fallback();
   test_prefilter_falls_back_to_dense_search_when_shortlist_is_empty();
+  test_lexical_and_hash_shortlists_are_merged_before_dense_rerank();
   return 0;
 }

@@ -229,6 +229,7 @@ endif()
 add_executable(test_sqlite_vectordb_backend
     ${CMAKE_CURRENT_SOURCE_DIR}/group_c_vectordb/test_sqlite_vectordb_backend.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/vector_db/SqliteVectorDB.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/retrieval/SemanticHash.cpp
 )
 
 target_include_directories(test_sqlite_vectordb_backend PRIVATE
@@ -369,6 +370,7 @@ add_test(NAME CommandLineArgsTest COMMAND $<TARGET_FILE:test_command_line_args>)
 add_test(NAME LlamaLoggingTest COMMAND $<TARGET_FILE:test_llama_logging>)
 add_test(NAME SemanticHashingTest COMMAND $<TARGET_FILE:test_semantic_hashing>)
 add_test(NAME RAGSemanticHashPrefilterTest COMMAND $<TARGET_FILE:test_rag_semantic_hash_prefilter>)
+add_test(NAME SqliteVectorDBBackendTest COMMAND $<TARGET_FILE:test_sqlite_vectordb_backend>)
 add_test(NAME VectorDBTest COMMAND $<TARGET_FILE:test_vectordb>)
 add_test(NAME EmbeddingTest COMMAND $<TARGET_FILE:test_embedding>)
 add_test(NAME LLMTest COMMAND $<TARGET_FILE:test_llm>)
@@ -381,6 +383,7 @@ set_tests_properties(
     LlamaLoggingTest
     SemanticHashingTest
     RAGSemanticHashPrefilterTest
+    SqliteVectorDBBackendTest
     EmbeddingTest
     LLMTest
     VectorDBTest
@@ -404,6 +407,7 @@ endif()
 message(STATUS "Tests configured:")
 message(STATUS "  - test_semantic_hashing (Group C - semantic hash)")
 message(STATUS "  - test_rag_semantic_hash_prefilter (query-time semantic hash prefilter)")
+message(STATUS "  - test_sqlite_vectordb_backend (SQLite lexical/vector backend)")
 message(STATUS "  - test_embedding (Group A)")
 message(STATUS "  - test_llm (Group B)")
 message(STATUS "  - test_vectordb (Group C - basic)")

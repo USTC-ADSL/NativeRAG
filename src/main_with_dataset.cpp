@@ -60,6 +60,10 @@ int main(int argc, char** argv) {
               << "  Top-K: " << config.top_k << '\n'
               << "  Threads: " << config.num_threads << '\n'
               << "  Max New Tokens: " << config.max_new_tokens << '\n'
+              << "  Lexical Prefilter: "
+              << (config.lexical_prefilter ? "enabled" : "disabled") << '\n'
+              << "  Lexical Candidates: "
+              << config.lexical_candidate_limit << '\n'
               << "  Semantic Hash Prefilter: "
               << (config.semantic_hash_prefilter ? "enabled" : "disabled") << '\n'
               << "  Semantic Hash Candidates: "
@@ -101,6 +105,9 @@ int main(int argc, char** argv) {
     RAGPipelineWithDataset pipeline(loader, embedder, index, nullptr, sqlite_db,
                                     config.top_k, config.chunk_size,
                                     config.chunk_overlap);
+    pipeline.set_lexical_prefilter(
+        {config.lexical_prefilter,
+         config.lexical_candidate_limit});
     pipeline.set_semantic_hash_prefilter(
         {config.semantic_hash_prefilter,
          config.semantic_hash_candidate_limit,
@@ -186,6 +193,9 @@ int main(int argc, char** argv) {
     RAGPipelineWithDataset pipeline(nullptr, embedder, index, llm, sqlite_db,
                                     config.top_k, config.chunk_size,
                                     config.chunk_overlap);
+    pipeline.set_lexical_prefilter(
+        {config.lexical_prefilter,
+         config.lexical_candidate_limit});
     pipeline.set_semantic_hash_prefilter(
         {config.semantic_hash_prefilter,
          config.semantic_hash_candidate_limit,
@@ -255,6 +265,9 @@ int main(int argc, char** argv) {
     RAGPipelineWithDataset pipeline(nullptr, embedder, index, llm, sqlite_db,
                                     config.top_k, config.chunk_size,
                                     config.chunk_overlap);
+    pipeline.set_lexical_prefilter(
+        {config.lexical_prefilter,
+         config.lexical_candidate_limit});
     pipeline.set_semantic_hash_prefilter(
         {config.semantic_hash_prefilter,
          config.semantic_hash_candidate_limit,

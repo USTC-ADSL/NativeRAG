@@ -23,6 +23,11 @@ class RAGPipeline {
     int max_hamming_distance = -1;
   };
 
+  struct LexicalPrefilterConfig {
+    bool enabled = false;
+    int candidate_limit = 16;
+  };
+
   RAGPipeline(std::shared_ptr<IDocumentLoader> loader,
               std::shared_ptr<IEmbeddingModel> embedder,
               std::shared_ptr<IVectorIndex> index,
@@ -59,6 +64,7 @@ class RAGPipeline {
   std::string answer_query(const std::string& query);
 
   void set_semantic_hash_prefilter(SemanticHashPrefilterConfig config);
+  void set_lexical_prefilter(LexicalPrefilterConfig config);
 
  protected:
   bool add_text_embeddings(const std::vector<std::string>& texts,
@@ -77,6 +83,7 @@ class RAGPipeline {
   size_t chunk_size_ = 1000;
   size_t chunk_overlap_ = 200;
   SemanticHashPrefilterConfig semantic_hash_prefilter_;
+  LexicalPrefilterConfig lexical_prefilter_;
 };
 
 }  // namespace mobile_rag

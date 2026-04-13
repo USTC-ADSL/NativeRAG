@@ -1,10 +1,12 @@
 #include "vector_db/SqliteVectorDB.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstring>
 #include <iostream>
 #include <limits>
+#include <unordered_set>
 
 #include "retrieval/SemanticHash.hpp"
 
@@ -12,6 +14,77 @@ namespace mobile_rag {
 
 namespace {
 int exec_noop_callback(void*, int, char**, char**) { return 0; }
+
+std::vector<std::string> tokenize_lexical_terms(const std::string& text) {
+  std::vector<std::string> terms;
+  std::string current;
+  for (char ch : text) {
+    if (std::isalnum(static_cast<unsigned char>(ch))) {
+      current.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+    } else if (!current.empty()) {
+      if (current.size() > 1) {
+        terms.push_back(current);
+      }
+      current.clear();
+    }
+  }
+
+  if (!current.empty() && current.size() > 1) {
+    terms.push_back(current);
+  }
+
+  return terms;
+}
+
+std::string build_fts_match_query(const std::vector<std::string>& terms) {
+  std::string query;
+  for (size_t i = 0; i < terms.size(); ++i) {
+    if (i > 0) {
+      query += " OR ";
+    }
+    query += terms[i];
+  }
+  return query;
+}
+
+int lexical_overlap_score(const std::vector<std::string>& query_terms,
+                          const std::string& candidate_text) {
+  if (query_terms.empty() || candidate_text.empty()) {
+    return 0;
+  }
+
+  const auto candidate_terms_vec = tokenize_lexical_terms(candidate_text);
+  if (candidate_terms_vec.empty()) {
+    return 0;
+  }
+
+  const std::unordered_set<std::string> candidate_terms(
+      candidate_terms_vec.begin(), candidate_terms_vec.end());
+
+  int score = 0;
+  for (const auto& term : query_terms) {
+    if (candidate_terms.count(term) > 0) {
+      ++score;
+    }
+  }
+  return score;
+}
+
+void try_enable_text_fts(sqlite3* db) {
+  const char* sql =
+      "CREATE VIRTUAL TABLE IF NOT EXISTS texts_fts "
+      "USING fts5(text, tokenize='unicode61');";
+  char* err = nullptr;
+  const int rc = sqlite3_exec(db, sql, exec_noop_callback, nullptr, &err);
+  if (rc != SQLITE_OK) {
+    std::cerr << "[SqliteVectorDB] Warning: Failed to enable texts_fts: "
+              << (err ? err : sqlite3_errmsg(db))
+              << ". Falling back to non-FTS lexical search.\n";
+  }
+  if (err) {
+    sqlite3_free(err);
+  }
+}
 
 float cosine_similarity(const std::vector<float>& lhs,
                         const std::vector<float>& rhs) {
@@ -93,6 +166,7 @@ bool SqliteVectorDB::initialize_schema() {
     return false;
   }
   if (err) sqlite3_free(err);
+  try_enable_text_fts(db_);
   return true;
 }
 
@@ -309,6 +383,109 @@ std::vector<std::pair<int64_t, float>> SqliteVectorDB::search_with_ids(
   return scored_results;
 }
 
+std::vector<std::pair<int64_t, float>> SqliteVectorDB::search_text_lexical(
+    const std::string& query,
+    int k) const {
+  if (!db_ || query.empty() || k <= 0) {
+    return {};
+  }
+
+  const auto query_terms = tokenize_lexical_terms(query);
+  if (query_terms.empty()) {
+    return {};
+  }
+
+  const std::string fts_query = build_fts_match_query(query_terms);
+  const char* fts_sql =
+      "SELECT rowid, bm25(texts_fts) "
+      "FROM texts_fts WHERE texts_fts MATCH ? "
+      "ORDER BY bm25(texts_fts) LIMIT ?;";
+  sqlite3_stmt* stmt = nullptr;
+  int rc = sqlite3_prepare_v2(db_, fts_sql, -1, &stmt, nullptr);
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_bind_text(stmt, 1, fts_query.c_str(), -1, SQLITE_TRANSIENT);
+    if (rc != SQLITE_OK) {
+      std::cerr << "[SqliteVectorDB] Failed to bind lexical FTS query: "
+                << sqlite3_errmsg(db_) << '\n';
+      sqlite3_finalize(stmt);
+      return {};
+    }
+
+    rc = sqlite3_bind_int(stmt, 2, k);
+    if (rc != SQLITE_OK) {
+      std::cerr << "[SqliteVectorDB] Failed to bind lexical FTS limit: "
+                << sqlite3_errmsg(db_) << '\n';
+      sqlite3_finalize(stmt);
+      return {};
+    }
+
+    std::vector<std::pair<int64_t, float>> results;
+    while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+      const auto id = static_cast<int64_t>(sqlite3_column_int64(stmt, 0));
+      const double bm25_score = sqlite3_column_double(stmt, 1);
+      results.emplace_back(id, static_cast<float>(-bm25_score));
+    }
+
+    if (rc != SQLITE_DONE) {
+      std::cerr << "[SqliteVectorDB] Lexical FTS search failed: "
+                << sqlite3_errmsg(db_) << '\n';
+      sqlite3_finalize(stmt);
+      return {};
+    }
+
+    sqlite3_finalize(stmt);
+    return results;
+  }
+
+  if (stmt) {
+    sqlite3_finalize(stmt);
+  }
+
+  const char* sql = "SELECT id, text FROM texts;";
+  rc = sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr);
+  if (rc != SQLITE_OK) {
+    std::cerr << "[SqliteVectorDB] Failed to prepare lexical fallback query: "
+              << sqlite3_errmsg(db_) << '\n';
+    return {};
+  }
+
+  std::vector<std::pair<int64_t, float>> scored_results;
+  while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+    const auto id = static_cast<int64_t>(sqlite3_column_int64(stmt, 0));
+    const unsigned char* text = sqlite3_column_text(stmt, 1);
+    if (!text) {
+      continue;
+    }
+
+    const int score = lexical_overlap_score(
+        query_terms, reinterpret_cast<const char*>(text));
+    if (score > 0) {
+      scored_results.emplace_back(id, static_cast<float>(score));
+    }
+  }
+
+  if (rc != SQLITE_DONE) {
+    std::cerr << "[SqliteVectorDB] Lexical fallback iteration failed: "
+              << sqlite3_errmsg(db_) << '\n';
+    sqlite3_finalize(stmt);
+    return {};
+  }
+  sqlite3_finalize(stmt);
+
+  std::sort(scored_results.begin(), scored_results.end(),
+            [](const auto& lhs, const auto& rhs) {
+              if (lhs.second != rhs.second) {
+                return lhs.second > rhs.second;
+              }
+              return lhs.first < rhs.first;
+            });
+
+  if (scored_results.size() > static_cast<size_t>(k)) {
+    scored_results.resize(static_cast<size_t>(k));
+  }
+  return scored_results;
+}
+
 bool SqliteVectorDB::add_semantic_hashes(
     const std::vector<std::vector<std::uint8_t>>& codes,
     const std::vector<int64_t>& ids,
@@ -505,6 +682,21 @@ bool SqliteVectorDB::add_texts(const std::vector<std::string>& texts,
     return false;
   }
 
+  sqlite3_stmt* fts_delete_stmt = nullptr;
+  sqlite3_stmt* fts_insert_stmt = nullptr;
+  bool use_fts = false;
+  if (sqlite3_prepare_v2(db_, "DELETE FROM texts_fts WHERE rowid = ?;",
+                         -1, &fts_delete_stmt, nullptr) == SQLITE_OK &&
+      sqlite3_prepare_v2(db_, "INSERT INTO texts_fts(rowid, text) VALUES (?, ?);",
+                         -1, &fts_insert_stmt, nullptr) == SQLITE_OK) {
+    use_fts = true;
+  } else {
+    if (fts_delete_stmt) sqlite3_finalize(fts_delete_stmt);
+    if (fts_insert_stmt) sqlite3_finalize(fts_insert_stmt);
+    fts_delete_stmt = nullptr;
+    fts_insert_stmt = nullptr;
+  }
+
   for (size_t i = 0; i < texts.size(); ++i) {
     rc = sqlite3_bind_int64(stmt, 1, static_cast<sqlite3_int64>(ids[i]));
     if (rc != SQLITE_OK) {
@@ -529,8 +721,68 @@ bool SqliteVectorDB::add_texts(const std::vector<std::string>& texts,
     }
     sqlite3_reset(stmt);
     sqlite3_clear_bindings(stmt);
+
+    if (use_fts) {
+      rc = sqlite3_bind_int64(fts_delete_stmt, 1, static_cast<sqlite3_int64>(ids[i]));
+      if (rc != SQLITE_OK) {
+        std::cerr << "[SqliteVectorDB] bind rowid failed for texts_fts delete: "
+                  << sqlite3_errmsg(db_) << '\n';
+        sqlite3_finalize(stmt);
+        sqlite3_finalize(fts_delete_stmt);
+        sqlite3_finalize(fts_insert_stmt);
+        sqlite3_exec(db_, "ROLLBACK;", nullptr, nullptr, nullptr);
+        return false;
+      }
+      rc = sqlite3_step(fts_delete_stmt);
+      if (rc != SQLITE_DONE) {
+        std::cerr << "[SqliteVectorDB] delete failed for texts_fts: "
+                  << sqlite3_errmsg(db_) << '\n';
+        sqlite3_finalize(stmt);
+        sqlite3_finalize(fts_delete_stmt);
+        sqlite3_finalize(fts_insert_stmt);
+        sqlite3_exec(db_, "ROLLBACK;", nullptr, nullptr, nullptr);
+        return false;
+      }
+      sqlite3_reset(fts_delete_stmt);
+      sqlite3_clear_bindings(fts_delete_stmt);
+
+      rc = sqlite3_bind_int64(fts_insert_stmt, 1, static_cast<sqlite3_int64>(ids[i]));
+      if (rc != SQLITE_OK) {
+        std::cerr << "[SqliteVectorDB] bind rowid failed for texts_fts insert: "
+                  << sqlite3_errmsg(db_) << '\n';
+        sqlite3_finalize(stmt);
+        sqlite3_finalize(fts_delete_stmt);
+        sqlite3_finalize(fts_insert_stmt);
+        sqlite3_exec(db_, "ROLLBACK;", nullptr, nullptr, nullptr);
+        return false;
+      }
+      rc = sqlite3_bind_text(fts_insert_stmt, 2, texts[i].c_str(), -1, SQLITE_TRANSIENT);
+      if (rc != SQLITE_OK) {
+        std::cerr << "[SqliteVectorDB] bind text failed for texts_fts insert: "
+                  << sqlite3_errmsg(db_) << '\n';
+        sqlite3_finalize(stmt);
+        sqlite3_finalize(fts_delete_stmt);
+        sqlite3_finalize(fts_insert_stmt);
+        sqlite3_exec(db_, "ROLLBACK;", nullptr, nullptr, nullptr);
+        return false;
+      }
+      rc = sqlite3_step(fts_insert_stmt);
+      if (rc != SQLITE_DONE) {
+        std::cerr << "[SqliteVectorDB] insert failed for texts_fts: "
+                  << sqlite3_errmsg(db_) << '\n';
+        sqlite3_finalize(stmt);
+        sqlite3_finalize(fts_delete_stmt);
+        sqlite3_finalize(fts_insert_stmt);
+        sqlite3_exec(db_, "ROLLBACK;", nullptr, nullptr, nullptr);
+        return false;
+      }
+      sqlite3_reset(fts_insert_stmt);
+      sqlite3_clear_bindings(fts_insert_stmt);
+    }
   }
   sqlite3_finalize(stmt);
+  if (fts_delete_stmt) sqlite3_finalize(fts_delete_stmt);
+  if (fts_insert_stmt) sqlite3_finalize(fts_insert_stmt);
 
   if (sqlite3_exec(db_, "COMMIT;", nullptr, nullptr, &err) != SQLITE_OK) {
     std::cerr << "[SqliteVectorDB] Commit failed: " << (err ? err : "unknown") << '\n';
@@ -571,6 +823,48 @@ bool SqliteVectorDB::set_text_for_id(int64_t id, const std::string& text) {
     return false;
   }
   sqlite3_finalize(stmt);
+
+  sqlite3_stmt* fts_delete_stmt = nullptr;
+  sqlite3_stmt* fts_insert_stmt = nullptr;
+  if (sqlite3_prepare_v2(db_, "DELETE FROM texts_fts WHERE rowid = ?;",
+                         -1, &fts_delete_stmt, nullptr) == SQLITE_OK &&
+      sqlite3_prepare_v2(db_, "INSERT INTO texts_fts(rowid, text) VALUES (?, ?);",
+                         -1, &fts_insert_stmt, nullptr) == SQLITE_OK) {
+    rc = sqlite3_bind_int64(fts_delete_stmt, 1, static_cast<sqlite3_int64>(id));
+    if (rc != SQLITE_OK) {
+      sqlite3_finalize(fts_delete_stmt);
+      sqlite3_finalize(fts_insert_stmt);
+      return false;
+    }
+    rc = sqlite3_step(fts_delete_stmt);
+    if (rc != SQLITE_DONE) {
+      sqlite3_finalize(fts_delete_stmt);
+      sqlite3_finalize(fts_insert_stmt);
+      return false;
+    }
+    sqlite3_finalize(fts_delete_stmt);
+
+    rc = sqlite3_bind_int64(fts_insert_stmt, 1, static_cast<sqlite3_int64>(id));
+    if (rc != SQLITE_OK) {
+      sqlite3_finalize(fts_insert_stmt);
+      return false;
+    }
+    rc = sqlite3_bind_text(fts_insert_stmt, 2, text.c_str(), -1, SQLITE_TRANSIENT);
+    if (rc != SQLITE_OK) {
+      sqlite3_finalize(fts_insert_stmt);
+      return false;
+    }
+    rc = sqlite3_step(fts_insert_stmt);
+    if (rc != SQLITE_DONE) {
+      sqlite3_finalize(fts_insert_stmt);
+      return false;
+    }
+    sqlite3_finalize(fts_insert_stmt);
+  } else {
+    if (fts_delete_stmt) sqlite3_finalize(fts_delete_stmt);
+    if (fts_insert_stmt) sqlite3_finalize(fts_insert_stmt);
+  }
+
   return true;
 }
 

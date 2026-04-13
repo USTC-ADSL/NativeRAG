@@ -118,6 +118,12 @@ void RAGPipeline::set_semantic_hash_prefilter(SemanticHashPrefilterConfig config
   semantic_hash_prefilter_.max_hamming_distance = config.max_hamming_distance;
 }
 
+void RAGPipeline::set_lexical_prefilter(LexicalPrefilterConfig config) {
+  lexical_prefilter_.enabled = config.enabled;
+  lexical_prefilter_.candidate_limit =
+      std::max(top_k_, std::max(1, config.candidate_limit));
+}
+
 bool RAGPipeline::add_text_embeddings(const std::vector<std::string>& texts,
                                       const std::vector<std::vector<float>>& vectors,
                                       const std::string& source_label) {
@@ -320,23 +326,47 @@ std::string RAGPipeline::answer_query(const std::string& query) {
   std::vector<std::pair<int64_t, float>> results;
   std::string retrieval_mode = "dense_only";
   std::string fallback_reason = "prefilter_disabled";
+  size_t lexical_candidate_count = 0;
   size_t hash_candidate_count = 0;
 
-  if (semantic_hash_prefilter_.enabled && sqlite_db_) {
-    retrieval_mode = "semantic_hash_prefilter";
+  if ((lexical_prefilter_.enabled || semantic_hash_prefilter_.enabled) && sqlite_db_) {
+    if (lexical_prefilter_.enabled && semantic_hash_prefilter_.enabled) {
+      retrieval_mode = "lexical_hash_prefilter";
+    } else if (lexical_prefilter_.enabled) {
+      retrieval_mode = "lexical_prefilter";
+    } else {
+      retrieval_mode = "semantic_hash_prefilter";
+    }
     fallback_reason = "none";
 
-    const auto query_code = build_sign_semantic_hash(q);
-    const auto hash_matches = sqlite_db_->search_by_semantic_hash(
-        query_code,
-        semantic_hash_prefilter_.candidate_limit,
-        semantic_hash_prefilter_.max_hamming_distance);
-    hash_candidate_count = hash_matches.size();
-
     std::vector<int64_t> candidate_ids;
-    candidate_ids.reserve(hash_matches.size());
-    for (const auto& [id, /*distance*/ _] : hash_matches) {
-      candidate_ids.push_back(id);
+    std::unordered_set<int64_t> seen_ids;
+
+    if (lexical_prefilter_.enabled) {
+      const auto lexical_matches = sqlite_db_->search_text_lexical(
+          query, lexical_prefilter_.candidate_limit);
+      lexical_candidate_count = lexical_matches.size();
+      candidate_ids.reserve(candidate_ids.size() + lexical_matches.size());
+      for (const auto& [id, /*score*/ _] : lexical_matches) {
+        if (seen_ids.insert(id).second) {
+          candidate_ids.push_back(id);
+        }
+      }
+    }
+
+    if (semantic_hash_prefilter_.enabled) {
+      const auto query_code = build_sign_semantic_hash(q);
+      const auto hash_matches = sqlite_db_->search_by_semantic_hash(
+          query_code,
+          semantic_hash_prefilter_.candidate_limit,
+          semantic_hash_prefilter_.max_hamming_distance);
+      hash_candidate_count = hash_matches.size();
+      candidate_ids.reserve(candidate_ids.size() + hash_matches.size());
+      for (const auto& [id, /*distance*/ _] : hash_matches) {
+        if (seen_ids.insert(id).second) {
+          candidate_ids.push_back(id);
+        }
+      }
     }
 
     if (!candidate_ids.empty()) {
@@ -351,7 +381,14 @@ std::string RAGPipeline::answer_query(const std::string& query) {
     if (results.empty()) {
       results = index_->search(q, top_k_);
     }
-  } else if (semantic_hash_prefilter_.enabled) {
+  } else if (lexical_prefilter_.enabled || semantic_hash_prefilter_.enabled) {
+    if (lexical_prefilter_.enabled && semantic_hash_prefilter_.enabled) {
+      retrieval_mode = "lexical_hash_prefilter";
+    } else if (lexical_prefilter_.enabled) {
+      retrieval_mode = "lexical_prefilter";
+    } else {
+      retrieval_mode = "semantic_hash_prefilter";
+    }
     fallback_reason = "sqlite_unavailable";
     results = index_->search(q, top_k_);
   } else {
@@ -359,6 +396,7 @@ std::string RAGPipeline::answer_query(const std::string& query) {
   }
 
   std::cout << "[RETRIEVAL] mode=" << retrieval_mode
+            << " lexical_candidates=" << lexical_candidate_count
             << " hash_candidates=" << hash_candidate_count
             << " dense_results=" << results.size()
             << " fallback=" << fallback_reason << '\n';

@@ -79,6 +79,9 @@ void test_query_parses_semantic_hash_prefilter_flags() {
       llm_path.string(),
       "--embedding-model",
       embedding_path.string(),
+      "--lexical-prefilter",
+      "--lexical-candidates",
+      "12",
       "--semantic-hash-prefilter",
       "--semantic-hash-candidates",
       "24",
@@ -97,6 +100,8 @@ void test_query_parses_semantic_hash_prefilter_flags() {
   assert(parsed);
 
   const auto& config = parser.get_config();
+  assert(config.lexical_prefilter);
+  assert(config.lexical_candidate_limit == 12);
   assert(config.semantic_hash_prefilter);
   assert(config.semantic_hash_candidate_limit == 24);
   assert(config.semantic_hash_max_distance == 12);

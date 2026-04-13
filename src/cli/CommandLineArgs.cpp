@@ -93,6 +93,10 @@ bool CommandLineArgs::parse_options() {
       config_.num_threads = std::stoi(argv_[++i]);
     } else if (arg == "--max-new-tokens" && i + 1 < argc_) {
       config_.max_new_tokens = std::stoi(argv_[++i]);
+    } else if (arg == "--lexical-prefilter") {
+      config_.lexical_prefilter = true;
+    } else if (arg == "--lexical-candidates" && i + 1 < argc_) {
+      config_.lexical_candidate_limit = std::stoi(argv_[++i]);
     } else if (arg == "--semantic-hash-prefilter") {
       config_.semantic_hash_prefilter = true;
     } else if (arg == "--semantic-hash-candidates" && i + 1 < argc_) {
@@ -267,6 +271,11 @@ bool CommandLineArgs::validate_config() {
     return false;
   }
 
+  if (config_.lexical_candidate_limit <= 0) {
+    std::cerr << "Error: --lexical-candidates must be positive\n";
+    return false;
+  }
+
   if (config_.semantic_hash_candidate_limit <= 0) {
     std::cerr << "Error: --semantic-hash-candidates must be positive\n";
     return false;
@@ -347,6 +356,8 @@ void CommandLineArgs::print_help() const {
             << "  --top-k <num>                Number of documents to retrieve (default: 5)\n"
             << "  --threads <num>              Number of threads (default: 4)\n"
             << "  --max-new-tokens <num>       Maximum generated tokens (default: 256)\n"
+            << "  --lexical-prefilter          Enable SQLite lexical shortlist before dense rerank\n"
+            << "  --lexical-candidates <num>   Lexical shortlist size (default: 16)\n"
             << "  --semantic-hash-prefilter    Enable SQLite semantic-hash shortlist before dense rerank\n"
             << "  --semantic-hash-candidates <num>\n"
             << "                               Semantic-hash shortlist size (default: 32)\n"

@@ -53,6 +53,11 @@ int main() {
     const auto beta_results = db.search({0.0f, 1.0f, 0.0f}, 1);
     assert(beta_results.size() == 1);
     assert_top_result(beta_results, 20);
+
+    const auto lexical_results = db.search_text_lexical("alpha metadata", 2);
+    assert(lexical_results.size() == 2);
+    assert(lexical_results[0].first == 10);
+    assert(lexical_results[1].first == 30);
   }
 
   {
@@ -62,6 +67,10 @@ int main() {
     assert_top_result(reopened_results, 10);
     assert(reopened_results[1].first == 30);
     assert(reopened_results[2].first == 20);
+
+    const auto reopened_lexical = reopened.search_text_lexical("beta", 1);
+    assert(reopened_lexical.size() == 1);
+    assert(reopened_lexical[0].first == 20);
   }
 
   std::filesystem::remove(db_path);
