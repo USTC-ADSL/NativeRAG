@@ -71,6 +71,11 @@ int main() {
     assert(db.get_text_for_id(30) == "alpha-ish");
     assert(db.get_chunk_state(10) == "warm");
     assert(db.count_chunk_state_transitions(10) == 1);
+    const auto initial_summary = db.get_chunk_state_summary();
+    assert(initial_summary.cold_count == 0);
+    assert(initial_summary.warm_count == 3);
+    assert(initial_summary.hot_count == 0);
+    assert(initial_summary.transition_count == 3);
     assert(db.export_chunk_state_snapshot(warm_snapshot));
 
     const auto beta_results = db.search({0.0f, 1.0f, 0.0f}, 1);
@@ -93,6 +98,11 @@ int main() {
     assert(db.get_chunk_state(10) == "warm");
     assert(db.get_chunk_state(20) == "hot");
     assert(db.count_chunk_state_transitions(10) == 3);
+    const auto demoted_summary = db.get_chunk_state_summary();
+    assert(demoted_summary.cold_count == 0);
+    assert(demoted_summary.warm_count == 2);
+    assert(demoted_summary.hot_count == 1);
+    assert(demoted_summary.transition_count == 6);
   }
 
   {
@@ -112,6 +122,11 @@ int main() {
     assert(reopened.update_chunk_state(10, ChunkState::COLD, "manual_demotion"));
     assert(reopened.get_chunk_state(10) == "cold");
     assert(reopened.count_chunk_state_transitions(10) == 4);
+    const auto reopened_summary = reopened.get_chunk_state_summary();
+    assert(reopened_summary.cold_count == 1);
+    assert(reopened_summary.warm_count == 1);
+    assert(reopened_summary.hot_count == 1);
+    assert(reopened_summary.transition_count == 7);
     assert(reopened.export_chunk_state_snapshot(snapshot));
   }
 
@@ -143,6 +158,11 @@ int main() {
     assert(restored.get_chunk_state(20) == "hot");
     assert(restored.count_chunk_state_transitions(10) == 4);
     assert(restored.count_chunk_state_transitions(20) == 2);
+    const auto restored_summary = restored.get_chunk_state_summary();
+    assert(restored_summary.cold_count == 1);
+    assert(restored_summary.warm_count == 1);
+    assert(restored_summary.hot_count == 1);
+    assert(restored_summary.transition_count == 7);
     std::filesystem::remove(restored_db_path);
   }
 

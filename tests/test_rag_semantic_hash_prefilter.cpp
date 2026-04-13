@@ -293,6 +293,8 @@ void test_query_promotes_new_hit_and_demotes_previous_hot_chunk() {
   const auto first_run = run_query_and_capture_stdout(pipeline, first_query);
   assert(first_run.stdout_text.find("[INDEX_STATE] promoted_to_hot=1 demoted_to_warm=0") !=
          std::string::npos);
+  assert(first_run.stdout_text.find("[INDEX_STATE_SUMMARY] hot=1 warm=1 cold=0 transitions=3") !=
+         std::string::npos);
   assert(sqlite_db->get_chunk_state(0) == "hot");
   assert(sqlite_db->get_chunk_state(1) == "warm");
 
@@ -301,6 +303,8 @@ void test_query_promotes_new_hit_and_demotes_previous_hot_chunk() {
   index->search_results = {{1, 0.88f}};
   const auto second_run = run_query_and_capture_stdout(pipeline, second_query);
   assert(second_run.stdout_text.find("[INDEX_STATE] promoted_to_hot=1 demoted_to_warm=1") !=
+         std::string::npos);
+  assert(second_run.stdout_text.find("[INDEX_STATE_SUMMARY] hot=1 warm=1 cold=0 transitions=5") !=
          std::string::npos);
   assert(sqlite_db->get_chunk_state(0) == "warm");
   assert(sqlite_db->get_chunk_state(1) == "hot");

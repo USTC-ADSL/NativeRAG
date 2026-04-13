@@ -15,6 +15,7 @@ The immediate goal is not full dense promotion/demotion yet. The goal of this pa
 - Query-time retrieved chunks are promoted to `hot`.
 - Query-time stale `hot` chunks that are not retained by the current retrieval result are demoted back to `warm`.
 - Query traces now emit an `[INDEX_STATE]` line showing both query-time promotions and demotions.
+- Query traces now also emit an `[INDEX_STATE_SUMMARY]` line with the current hot/warm/cold distribution and total transition count.
 - Focused regressions validate:
   - chunk-state initialization
   - promotion and demotion history
@@ -30,6 +31,7 @@ The immediate goal is not full dense promotion/demotion yet. The goal of this pa
   - `initialize_chunk_states(...)`
   - `update_chunk_state(...)`
   - `get_chunk_state(...)`
+  - `get_chunk_state_summary()`
   - `count_chunk_state_transitions(...)`
   - `demote_non_retrieved_hot_chunks(...)`
   - `export_chunk_state_snapshot(...)`
@@ -44,11 +46,17 @@ The immediate goal is not full dense promotion/demotion yet. The goal of this pa
   - importing a snapshot resets transition autoincrement tracking to the imported max event ID so replayed updates continue deterministically
 - `RAGPipeline::add_text_embeddings(...)` initializes newly ingested chunks as `warm`.
 - `SqliteVectorDB::demote_non_retrieved_hot_chunks(...)` scans canonical SQLite state for `hot` chunks that are not part of the current retained result set and records deterministic `hot -> warm` transitions.
+- `SqliteVectorDB::get_chunk_state_summary()` aggregates canonical SQLite state into:
+  - `hot_count`
+  - `warm_count`
+  - `cold_count`
+  - `transition_count`
 - `RAGPipeline::answer_query(...)` now:
   - computes the retained retrieval IDs for the final result set
   - demotes stale `hot` chunks to `warm` with reason `query_retrieval_miss`
   - promotes current result chunks to `hot` with reason `query_retrieval_hit`
   - emits an `[INDEX_STATE]` trace with both promotion and demotion counts
+  - emits an `[INDEX_STATE_SUMMARY]` trace with the post-query state distribution
 - CLI now exposes:
   - `--state-snapshot-in`
   - `--state-snapshot-out`
@@ -70,8 +78,9 @@ The immediate goal is not full dense promotion/demotion yet. The goal of this pa
 5. Any previously `hot` chunk that is not retained by the current result set is demoted to `warm`.
 6. Each retained retrieved chunk ID is then promoted to `hot`.
 7. The pipeline emits an `[INDEX_STATE]` log with both promotion and demotion counts for that query.
-8. Retrieval and generation behavior otherwise remain unchanged.
-9. When a snapshot flag is provided:
+8. The pipeline reads a fresh aggregated state summary from SQLite and emits `[INDEX_STATE_SUMMARY]`.
+9. Retrieval and generation behavior otherwise remain unchanged.
+10. When a snapshot flag is provided:
    - `--state-snapshot-in` restores chunk-state metadata before execution
    - `--state-snapshot-out` exports chunk-state metadata after execution
 
@@ -139,6 +148,11 @@ TRANSITION    <event_id>    <id>    <from_tier>    <to_tier>    <reason>    <cre
   - `promoted_to_hot`
   - `demoted_to_warm`
   - `retrieved_chunks`
+- Adds `[INDEX_STATE_SUMMARY]` query-time logs with:
+  - `hot`
+  - `warm`
+  - `cold`
+  - `transitions`
 
 ## How to test / reproduce
 
@@ -156,7 +170,9 @@ TRANSITION    <event_id>    <id>    <from_tier>    <to_tier>    <reason>    <cre
    - `mobile_rag --query ... --state-snapshot-in /tmp/run.snapshot.tsv`
 7. On device, rebuild runtime assets after the schema change and run two queries that hit different chunks:
    - first query should log `promoted_to_hot=1 demoted_to_warm=0`
+   - first query should log `[INDEX_STATE_SUMMARY] hot=1 warm=1 cold=0 transitions=3`
    - second query should log `promoted_to_hot=1 demoted_to_warm=1`
+   - second query should log `[INDEX_STATE_SUMMARY] hot=1 warm=1 cold=0 transitions=5`
    - both runs should still emit the normal `[EVIDENCE]` and retrieval traces
 
 ## Known limitations / TODOs

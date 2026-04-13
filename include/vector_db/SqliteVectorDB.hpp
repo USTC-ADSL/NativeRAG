@@ -20,6 +20,13 @@ enum class ChunkState {
 
 const char* chunk_state_name(ChunkState state);
 
+struct ChunkStateSummary {
+  int cold_count = 0;
+  int warm_count = 0;
+  int hot_count = 0;
+  int transition_count = 0;
+};
+
 class SqliteVectorDB : public IVectorDB {
  public:
   explicit SqliteVectorDB(const std::string& db_path = ":memory:");
@@ -61,6 +68,7 @@ class SqliteVectorDB : public IVectorDB {
                           ChunkState new_state,
                           const std::string& reason);
   std::string get_chunk_state(int64_t id) const;
+  ChunkStateSummary get_chunk_state_summary() const;
   int count_chunk_state_transitions(int64_t id) const;
   int demote_non_retrieved_hot_chunks(const std::vector<int64_t>& retained_ids,
                                       ChunkState target_state,

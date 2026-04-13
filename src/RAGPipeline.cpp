@@ -547,6 +547,11 @@ std::string RAGPipeline::answer_query(const std::string& query) {
     std::cout << "[INDEX_STATE] promoted_to_hot=" << promoted_to_hot
               << " demoted_to_warm=" << demoted_to_warm
               << " retrieved_chunks=" << execution.results.size() << '\n';
+    const auto state_summary = sqlite_db_->get_chunk_state_summary();
+    std::cout << "[INDEX_STATE_SUMMARY] hot=" << state_summary.hot_count
+              << " warm=" << state_summary.warm_count
+              << " cold=" << state_summary.cold_count
+              << " transitions=" << state_summary.transition_count << '\n';
   }
 
   std::cout << "[EVIDENCE] top_score=" << std::fixed << std::setprecision(4)

@@ -1112,6 +1112,54 @@ std::string SqliteVectorDB::get_chunk_state(int64_t id) const {
   return load_chunk_state(db_, id);
 }
 
+ChunkStateSummary SqliteVectorDB::get_chunk_state_summary() const {
+  ChunkStateSummary summary;
+  if (!db_) return summary;
+
+  const char* state_sql =
+      "SELECT tier, COUNT(*) FROM chunk_states GROUP BY tier ORDER BY tier;";
+  sqlite3_stmt* state_stmt = nullptr;
+  int rc = sqlite3_prepare_v2(db_, state_sql, -1, &state_stmt, nullptr);
+  if (rc == SQLITE_OK) {
+    while ((rc = sqlite3_step(state_stmt)) == SQLITE_ROW) {
+      const unsigned char* tier_text = sqlite3_column_text(state_stmt, 0);
+      const int count = sqlite3_column_int(state_stmt, 1);
+      const std::string tier = tier_text
+                                   ? reinterpret_cast<const char*>(tier_text)
+                                   : std::string();
+      if (tier == chunk_state_name(ChunkState::COLD)) {
+        summary.cold_count = count;
+      } else if (tier == chunk_state_name(ChunkState::WARM)) {
+        summary.warm_count = count;
+      } else if (tier == chunk_state_name(ChunkState::HOT)) {
+        summary.hot_count = count;
+      }
+    }
+  }
+  sqlite3_finalize(state_stmt);
+  if (rc != SQLITE_DONE) {
+    return ChunkStateSummary{};
+  }
+
+  const char* transition_sql = "SELECT COUNT(*) FROM chunk_state_transitions;";
+  sqlite3_stmt* transition_stmt = nullptr;
+  rc = sqlite3_prepare_v2(db_, transition_sql, -1, &transition_stmt, nullptr);
+  if (rc != SQLITE_OK) {
+    return ChunkStateSummary{};
+  }
+
+  rc = sqlite3_step(transition_stmt);
+  if (rc == SQLITE_ROW) {
+    summary.transition_count = sqlite3_column_int(transition_stmt, 0);
+  }
+  sqlite3_finalize(transition_stmt);
+  if (rc != SQLITE_ROW && rc != SQLITE_DONE) {
+    return ChunkStateSummary{};
+  }
+
+  return summary;
+}
+
 int SqliteVectorDB::count_chunk_state_transitions(int64_t id) const {
   if (!db_) return 0;
 
