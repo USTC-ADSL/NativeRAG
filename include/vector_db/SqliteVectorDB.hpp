@@ -32,6 +32,17 @@ class SqliteVectorDB : public IVectorDB {
                  const std::vector<int64_t>& ids);
   bool set_text_for_id(int64_t id, const std::string& text);
   std::string get_text_for_id(int64_t id) const;
+  bool add_semantic_hashes(const std::vector<std::vector<std::uint8_t>>& codes,
+                           const std::vector<int64_t>& ids,
+                           int bit_count);
+  std::vector<std::pair<int64_t, int>> search_by_semantic_hash(
+      const std::vector<std::uint8_t>& query_code,
+      int k,
+      int max_hamming_distance = -1) const;
+  std::vector<std::pair<int64_t, float>> search_with_ids(
+      const std::vector<float>& query_vector,
+      const std::vector<int64_t>& candidate_ids,
+      int k) const;
 
  private:
   bool initialize_schema();
@@ -42,6 +53,4 @@ class SqliteVectorDB : public IVectorDB {
 };
 
 }  // namespace mobile_rag
-
-
 

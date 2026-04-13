@@ -6,6 +6,8 @@
 #include <iostream>
 #include <limits>
 
+#include "retrieval/SemanticHash.hpp"
+
 namespace mobile_rag {
 
 namespace {
@@ -75,7 +77,13 @@ bool SqliteVectorDB::initialize_schema() {
       "id INTEGER PRIMARY KEY,"
       "text TEXT NOT NULL"
       ");"
-      "CREATE INDEX IF NOT EXISTS idx_texts_id ON texts(id);";
+      "CREATE INDEX IF NOT EXISTS idx_texts_id ON texts(id);"
+      "CREATE TABLE IF NOT EXISTS semantic_hashes ("
+      "id INTEGER PRIMARY KEY,"
+      "bit_count INTEGER NOT NULL,"
+      "code BLOB NOT NULL"
+      ");"
+      "CREATE INDEX IF NOT EXISTS idx_semantic_hashes_id ON semantic_hashes(id);";
   char* err = nullptr;
   if (sqlite3_exec(db_, create_table_sql, exec_noop_callback, nullptr, &err) !=
       SQLITE_OK) {
@@ -233,6 +241,235 @@ std::vector<std::pair<int64_t, float>> SqliteVectorDB::search(
   return scored_results;
 }
 
+std::vector<std::pair<int64_t, float>> SqliteVectorDB::search_with_ids(
+    const std::vector<float>& query_vector,
+    const std::vector<int64_t>& candidate_ids,
+    int k) const {
+  if (!db_ || query_vector.empty() || candidate_ids.empty() || k <= 0) {
+    return {};
+  }
+
+  const char* sql = "SELECT dim, data FROM vectors WHERE id = ?;";
+  sqlite3_stmt* stmt = nullptr;
+  int rc = sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr);
+  if (rc != SQLITE_OK) {
+    std::cerr << "[SqliteVectorDB] Failed to prepare filtered vector search: "
+              << sqlite3_errmsg(db_) << '\n';
+    return {};
+  }
+
+  std::vector<std::pair<int64_t, float>> scored_results;
+  scored_results.reserve(candidate_ids.size());
+  for (const auto id : candidate_ids) {
+    rc = sqlite3_bind_int64(stmt, 1, static_cast<sqlite3_int64>(id));
+    if (rc != SQLITE_OK) {
+      std::cerr << "[SqliteVectorDB] Failed to bind filtered vector id: "
+                << sqlite3_errmsg(db_) << '\n';
+      sqlite3_finalize(stmt);
+      return {};
+    }
+
+    rc = sqlite3_step(stmt);
+    if (rc == SQLITE_ROW) {
+      const int dim = sqlite3_column_int(stmt, 0);
+      const void* blob = sqlite3_column_blob(stmt, 1);
+      const int bytes = sqlite3_column_bytes(stmt, 1);
+
+      auto candidate = vector_from_blob(blob, bytes, dim);
+      if (!candidate.empty() && candidate.size() == query_vector.size()) {
+        const float score = cosine_similarity(query_vector, candidate);
+        if (std::isfinite(score)) {
+          scored_results.emplace_back(id, score);
+        }
+      }
+    } else if (rc != SQLITE_DONE) {
+      std::cerr << "[SqliteVectorDB] Filtered vector lookup failed: "
+                << sqlite3_errmsg(db_) << '\n';
+      sqlite3_finalize(stmt);
+      return {};
+    }
+
+    sqlite3_reset(stmt);
+    sqlite3_clear_bindings(stmt);
+  }
+
+  sqlite3_finalize(stmt);
+
+  std::sort(scored_results.begin(), scored_results.end(),
+            [](const auto& lhs, const auto& rhs) {
+              if (lhs.second != rhs.second) {
+                return lhs.second > rhs.second;
+              }
+              return lhs.first < rhs.first;
+            });
+
+  if (scored_results.size() > static_cast<size_t>(k)) {
+    scored_results.resize(static_cast<size_t>(k));
+  }
+  return scored_results;
+}
+
+bool SqliteVectorDB::add_semantic_hashes(
+    const std::vector<std::vector<std::uint8_t>>& codes,
+    const std::vector<int64_t>& ids,
+    int bit_count) {
+  if (!db_) return false;
+  if (codes.size() != ids.size()) return false;
+  if (codes.empty()) return true;
+  if (bit_count <= 0) return false;
+
+  char* err = nullptr;
+  if (sqlite3_exec(db_, "BEGIN TRANSACTION;", nullptr, nullptr, &err) != SQLITE_OK) {
+    std::cerr << "[SqliteVectorDB] Failed to begin semantic hash transaction: "
+              << (err ? err : "unknown") << '\n';
+    if (err) sqlite3_free(err);
+    return false;
+  }
+
+  const char* sql =
+      "INSERT INTO semantic_hashes (id, bit_count, code) VALUES (?, ?, ?) "
+      "ON CONFLICT(id) DO UPDATE SET bit_count=excluded.bit_count, code=excluded.code;";
+  sqlite3_stmt* stmt = nullptr;
+  int rc = sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr);
+  if (rc != SQLITE_OK) {
+    std::cerr << "[SqliteVectorDB] Failed to prepare statement for add_semantic_hashes: "
+              << sqlite3_errmsg(db_) << '\n';
+    sqlite3_exec(db_, "ROLLBACK;", nullptr, nullptr, nullptr);
+    return false;
+  }
+
+  for (size_t i = 0; i < codes.size(); ++i) {
+    const auto& code = codes[i];
+    if (code.empty()) {
+      std::cerr << "[SqliteVectorDB] Refusing to store empty semantic hash for id "
+                << ids[i] << '\n';
+      sqlite3_finalize(stmt);
+      sqlite3_exec(db_, "ROLLBACK;", nullptr, nullptr, nullptr);
+      return false;
+    }
+
+    rc = sqlite3_bind_int64(stmt, 1, static_cast<sqlite3_int64>(ids[i]));
+    if (rc != SQLITE_OK) {
+      std::cerr << "[SqliteVectorDB] bind id failed in add_semantic_hashes: "
+                << sqlite3_errmsg(db_) << '\n';
+      sqlite3_finalize(stmt);
+      sqlite3_exec(db_, "ROLLBACK;", nullptr, nullptr, nullptr);
+      return false;
+    }
+
+    rc = sqlite3_bind_int(stmt, 2, bit_count);
+    if (rc != SQLITE_OK) {
+      std::cerr << "[SqliteVectorDB] bind bit_count failed in add_semantic_hashes: "
+                << sqlite3_errmsg(db_) << '\n';
+      sqlite3_finalize(stmt);
+      sqlite3_exec(db_, "ROLLBACK;", nullptr, nullptr, nullptr);
+      return false;
+    }
+
+    rc = sqlite3_bind_blob(stmt, 3, code.data(), static_cast<int>(code.size()),
+                           SQLITE_TRANSIENT);
+    if (rc != SQLITE_OK) {
+      std::cerr << "[SqliteVectorDB] bind code failed in add_semantic_hashes: "
+                << sqlite3_errmsg(db_) << '\n';
+      sqlite3_finalize(stmt);
+      sqlite3_exec(db_, "ROLLBACK;", nullptr, nullptr, nullptr);
+      return false;
+    }
+
+    rc = sqlite3_step(stmt);
+    if (rc != SQLITE_DONE) {
+      std::cerr << "[SqliteVectorDB] step failed in add_semantic_hashes: "
+                << sqlite3_errmsg(db_) << '\n';
+      sqlite3_finalize(stmt);
+      sqlite3_exec(db_, "ROLLBACK;", nullptr, nullptr, nullptr);
+      return false;
+    }
+
+    sqlite3_reset(stmt);
+    sqlite3_clear_bindings(stmt);
+  }
+
+  sqlite3_finalize(stmt);
+
+  if (sqlite3_exec(db_, "COMMIT;", nullptr, nullptr, &err) != SQLITE_OK) {
+    std::cerr << "[SqliteVectorDB] Commit failed for add_semantic_hashes: "
+              << (err ? err : "unknown") << '\n';
+    if (err) sqlite3_free(err);
+    return false;
+  }
+  if (err) sqlite3_free(err);
+  return true;
+}
+
+std::vector<std::pair<int64_t, int>> SqliteVectorDB::search_by_semantic_hash(
+    const std::vector<std::uint8_t>& query_code,
+    int k,
+    int max_hamming_distance) const {
+  if (!db_ || query_code.empty() || k <= 0) {
+    return {};
+  }
+
+  const int query_bit_count = static_cast<int>(query_code.size() * 8);
+  const char* sql =
+      "SELECT id, code FROM semantic_hashes WHERE bit_count = ?;";
+  sqlite3_stmt* stmt = nullptr;
+  int rc = sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr);
+  if (rc != SQLITE_OK) {
+    std::cerr << "[SqliteVectorDB] Failed to prepare semantic hash query: "
+              << sqlite3_errmsg(db_) << '\n';
+    return {};
+  }
+
+  rc = sqlite3_bind_int(stmt, 1, query_bit_count);
+  if (rc != SQLITE_OK) {
+    std::cerr << "[SqliteVectorDB] Failed to bind semantic hash bit_count: "
+              << sqlite3_errmsg(db_) << '\n';
+    sqlite3_finalize(stmt);
+    return {};
+  }
+
+  std::vector<std::pair<int64_t, int>> scored_results;
+  while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+    const auto id = static_cast<int64_t>(sqlite3_column_int64(stmt, 0));
+    const void* blob = sqlite3_column_blob(stmt, 1);
+    const int bytes = sqlite3_column_bytes(stmt, 1);
+    if (blob == nullptr || bytes != static_cast<int>(query_code.size())) {
+      continue;
+    }
+
+    std::vector<std::uint8_t> candidate_code(static_cast<size_t>(bytes));
+    std::memcpy(candidate_code.data(), blob, static_cast<size_t>(bytes));
+
+    const int distance = hamming_distance(query_code, candidate_code);
+    if (distance == std::numeric_limits<int>::max()) {
+      continue;
+    }
+    if (max_hamming_distance >= 0 && distance > max_hamming_distance) {
+      continue;
+    }
+    scored_results.emplace_back(id, distance);
+  }
+
+  if (rc != SQLITE_DONE) {
+    std::cerr << "[SqliteVectorDB] Semantic hash iteration failed: "
+              << sqlite3_errmsg(db_) << '\n';
+  }
+  sqlite3_finalize(stmt);
+
+  std::sort(scored_results.begin(), scored_results.end(),
+            [](const auto& lhs, const auto& rhs) {
+              if (lhs.second != rhs.second) {
+                return lhs.second < rhs.second;
+              }
+              return lhs.first < rhs.first;
+            });
+
+  if (scored_results.size() > static_cast<size_t>(k)) {
+    scored_results.resize(static_cast<size_t>(k));
+  }
+  return scored_results;
+}
+
 bool SqliteVectorDB::save_index(const std::string& /*index_path*/) {
   // SQLite DB is already persisted at db_path_
   return true;
@@ -364,5 +601,3 @@ std::string SqliteVectorDB::get_text_for_id(int64_t id) const {
 }
 
 }  // namespace mobile_rag
-
-

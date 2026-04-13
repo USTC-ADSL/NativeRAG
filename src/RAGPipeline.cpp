@@ -7,6 +7,7 @@
 #include <unordered_set>
 
 #include "llm/PromptUtils.hpp"
+#include "retrieval/SemanticHash.hpp"
 
 namespace mobile_rag {
 
@@ -110,6 +111,13 @@ RAGPipeline::RAGPipeline(std::shared_ptr<IDocumentLoader> loader,
       chunk_size_(chunk_size > 0 ? chunk_size : 1000),
       chunk_overlap_(std::min(chunk_overlap, chunk_size_ > 0 ? chunk_size_ - 1 : 0)) {}
 
+void RAGPipeline::set_semantic_hash_prefilter(SemanticHashPrefilterConfig config) {
+  semantic_hash_prefilter_.enabled = config.enabled;
+  semantic_hash_prefilter_.candidate_limit =
+      std::max(top_k_, std::max(1, config.candidate_limit));
+  semantic_hash_prefilter_.max_hamming_distance = config.max_hamming_distance;
+}
+
 bool RAGPipeline::add_text_embeddings(const std::vector<std::string>& texts,
                                       const std::vector<std::vector<float>>& vectors,
                                       const std::string& source_label) {
@@ -188,12 +196,35 @@ bool RAGPipeline::add_text_embeddings(const std::vector<std::string>& texts,
   }
 
   if (sqlite_db_) {
+    if (!sqlite_db_->add_vectors(valid_vectors, ids)) {
+      std::cerr << "[RAGPipeline] Warning: Failed to persist dense vectors to SQLite for "
+                << source_label << '\n';
+    } else {
+      std::cout << "[RAGPipeline] Persisted " << valid_vectors.size()
+                << " dense vectors to SQLite\n";
+    }
+
     if (!sqlite_db_->add_texts(valid_texts, ids)) {
       std::cerr << "[RAGPipeline] Warning: Failed to persist texts to SQLite for "
                 << source_label << '\n';
     } else {
       std::cout << "[RAGPipeline] Persisted " << valid_texts.size()
                 << " text chunks to SQLite\n";
+    }
+
+    std::vector<std::vector<std::uint8_t>> semantic_hashes;
+    semantic_hashes.reserve(valid_vectors.size());
+    for (const auto& vector : valid_vectors) {
+      semantic_hashes.push_back(build_sign_semantic_hash(vector));
+    }
+
+    if (!sqlite_db_->add_semantic_hashes(
+            semantic_hashes, ids, static_cast<int>(kDefaultSemanticHashBits))) {
+      std::cerr << "[RAGPipeline] Warning: Failed to persist semantic hashes to SQLite for "
+                << source_label << '\n';
+    } else {
+      std::cout << "[RAGPipeline] Persisted " << semantic_hashes.size()
+                << " semantic hashes to SQLite\n";
     }
   }
 
@@ -286,7 +317,51 @@ std::string RAGPipeline::answer_query(const std::string& query) {
     return {};
   }
 
-  std::vector<std::pair<int64_t, float>> results = index_->search(q, top_k_);
+  std::vector<std::pair<int64_t, float>> results;
+  std::string retrieval_mode = "dense_only";
+  std::string fallback_reason = "prefilter_disabled";
+  size_t hash_candidate_count = 0;
+
+  if (semantic_hash_prefilter_.enabled && sqlite_db_) {
+    retrieval_mode = "semantic_hash_prefilter";
+    fallback_reason = "none";
+
+    const auto query_code = build_sign_semantic_hash(q);
+    const auto hash_matches = sqlite_db_->search_by_semantic_hash(
+        query_code,
+        semantic_hash_prefilter_.candidate_limit,
+        semantic_hash_prefilter_.max_hamming_distance);
+    hash_candidate_count = hash_matches.size();
+
+    std::vector<int64_t> candidate_ids;
+    candidate_ids.reserve(hash_matches.size());
+    for (const auto& [id, /*distance*/ _] : hash_matches) {
+      candidate_ids.push_back(id);
+    }
+
+    if (!candidate_ids.empty()) {
+      results = sqlite_db_->search_with_ids(q, candidate_ids, top_k_);
+      if (results.empty()) {
+        fallback_reason = "sqlite_rerank_empty";
+      }
+    } else {
+      fallback_reason = "empty_shortlist";
+    }
+
+    if (results.empty()) {
+      results = index_->search(q, top_k_);
+    }
+  } else if (semantic_hash_prefilter_.enabled) {
+    fallback_reason = "sqlite_unavailable";
+    results = index_->search(q, top_k_);
+  } else {
+    results = index_->search(q, top_k_);
+  }
+
+  std::cout << "[RETRIEVAL] mode=" << retrieval_mode
+            << " hash_candidates=" << hash_candidate_count
+            << " dense_results=" << results.size()
+            << " fallback=" << fallback_reason << '\n';
 
   // Print query and retrieval results for debugging/inspection
   std::cout << "\n[QUERY] " << query << '\n';

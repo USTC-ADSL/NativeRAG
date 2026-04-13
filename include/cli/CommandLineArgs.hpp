@@ -52,6 +52,8 @@ class CommandLineArgs {
     int num_threads = 4;
     int top_k = 5;  // Number of documents to retrieve
     int max_new_tokens = 256;
+    int semantic_hash_candidate_limit = 32;
+    int semantic_hash_max_distance = -1;
 
     // Chunking
     size_t chunk_size = 1000;
@@ -62,6 +64,7 @@ class CommandLineArgs {
     bool use_gpu = false;
     bool save_index = true;
     bool load_index = true;
+    bool semantic_hash_prefilter = false;
   };
 
   CommandLineArgs(int argc, char** argv);

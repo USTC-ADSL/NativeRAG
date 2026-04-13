@@ -138,6 +138,41 @@ target_link_libraries(test_llama_logging PRIVATE
     ${GGML_BASE_LIBRARY}
 )
 
+add_executable(test_semantic_hashing
+    ${CMAKE_CURRENT_SOURCE_DIR}/group_c_vectordb/test_semantic_hashing.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/vector_db/SqliteVectorDB.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/retrieval/SemanticHash.cpp
+)
+
+target_include_directories(test_semantic_hashing PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+)
+
+if (TARGET SQLite::SQLite3)
+    target_link_libraries(test_semantic_hashing PRIVATE SQLite::SQLite3)
+else()
+    target_link_libraries(test_semantic_hashing PRIVATE ${SQLite3_LIBRARIES})
+    target_include_directories(test_semantic_hashing PRIVATE ${SQLite3_INCLUDE_DIRS})
+endif()
+
+add_executable(test_rag_semantic_hash_prefilter
+    ${CMAKE_CURRENT_SOURCE_DIR}/test_rag_semantic_hash_prefilter.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/RAGPipeline.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/vector_db/SqliteVectorDB.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/retrieval/SemanticHash.cpp
+)
+
+target_include_directories(test_rag_semantic_hash_prefilter PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+)
+
+if (TARGET SQLite::SQLite3)
+    target_link_libraries(test_rag_semantic_hash_prefilter PRIVATE SQLite::SQLite3)
+else()
+    target_link_libraries(test_rag_semantic_hash_prefilter PRIVATE ${SQLite3_LIBRARIES})
+    target_include_directories(test_rag_semantic_hash_prefilter PRIVATE ${SQLite3_INCLUDE_DIRS})
+endif()
+
 if(USE_PREBUILT)
     set_target_properties(
         test_command_line_args
@@ -151,6 +186,7 @@ endif()
 # Core RAG library (implementation files)
 add_library(rag_core STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/RAGPipeline.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/retrieval/SemanticHash.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/embedding/MNNEmbedding.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/embedding/LlamaCppEmbedding.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/vector_db/FaissIndex.cpp
@@ -329,18 +365,22 @@ endif()
 
 # Enable testing
 enable_testing()
-add_test(NAME CommandLineArgsTest COMMAND test_command_line_args)
-add_test(NAME LlamaLoggingTest COMMAND test_llama_logging)
-add_test(NAME VectorDBTest COMMAND test_vectordb)
-add_test(NAME EmbeddingTest COMMAND test_embedding)
-add_test(NAME LLMTest COMMAND test_llm)
-add_test(NAME VectorDBIntegratedTest COMMAND test_vectordb_integrated)
-add_test(NAME RAGIntegrationTest COMMAND test_rag_integration)
+add_test(NAME CommandLineArgsTest COMMAND $<TARGET_FILE:test_command_line_args>)
+add_test(NAME LlamaLoggingTest COMMAND $<TARGET_FILE:test_llama_logging>)
+add_test(NAME SemanticHashingTest COMMAND $<TARGET_FILE:test_semantic_hashing>)
+add_test(NAME RAGSemanticHashPrefilterTest COMMAND $<TARGET_FILE:test_rag_semantic_hash_prefilter>)
+add_test(NAME VectorDBTest COMMAND $<TARGET_FILE:test_vectordb>)
+add_test(NAME EmbeddingTest COMMAND $<TARGET_FILE:test_embedding>)
+add_test(NAME LLMTest COMMAND $<TARGET_FILE:test_llm>)
+add_test(NAME VectorDBIntegratedTest COMMAND $<TARGET_FILE:test_vectordb_integrated>)
+add_test(NAME RAGIntegrationTest COMMAND $<TARGET_FILE:test_rag_integration>)
 
 # Set test properties
 set_tests_properties(
     CommandLineArgsTest
     LlamaLoggingTest
+    SemanticHashingTest
+    RAGSemanticHashPrefilterTest
     EmbeddingTest
     LLMTest
     VectorDBTest
@@ -362,6 +402,8 @@ if(USE_PREBUILT)
 endif()
 
 message(STATUS "Tests configured:")
+message(STATUS "  - test_semantic_hashing (Group C - semantic hash)")
+message(STATUS "  - test_rag_semantic_hash_prefilter (query-time semantic hash prefilter)")
 message(STATUS "  - test_embedding (Group A)")
 message(STATUS "  - test_llm (Group B)")
 message(STATUS "  - test_vectordb (Group C - basic)")

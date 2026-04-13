@@ -93,6 +93,12 @@ bool CommandLineArgs::parse_options() {
       config_.num_threads = std::stoi(argv_[++i]);
     } else if (arg == "--max-new-tokens" && i + 1 < argc_) {
       config_.max_new_tokens = std::stoi(argv_[++i]);
+    } else if (arg == "--semantic-hash-prefilter") {
+      config_.semantic_hash_prefilter = true;
+    } else if (arg == "--semantic-hash-candidates" && i + 1 < argc_) {
+      config_.semantic_hash_candidate_limit = std::stoi(argv_[++i]);
+    } else if (arg == "--semantic-hash-max-distance" && i + 1 < argc_) {
+      config_.semantic_hash_max_distance = std::stoi(argv_[++i]);
     } else if (arg == "--chunk-size" && i + 1 < argc_) {
       config_.chunk_size = static_cast<size_t>(std::stoull(argv_[++i]));
     } else if (arg == "--chunk-overlap" && i + 1 < argc_) {
@@ -261,6 +267,16 @@ bool CommandLineArgs::validate_config() {
     return false;
   }
 
+  if (config_.semantic_hash_candidate_limit <= 0) {
+    std::cerr << "Error: --semantic-hash-candidates must be positive\n";
+    return false;
+  }
+
+  if (config_.semantic_hash_max_distance < -1) {
+    std::cerr << "Error: --semantic-hash-max-distance must be -1 or greater\n";
+    return false;
+  }
+
   if (config_.chunk_size == 0) {
     std::cerr << "Error: --chunk-size must be positive\n";
     return false;
@@ -331,6 +347,11 @@ void CommandLineArgs::print_help() const {
             << "  --top-k <num>                Number of documents to retrieve (default: 5)\n"
             << "  --threads <num>              Number of threads (default: 4)\n"
             << "  --max-new-tokens <num>       Maximum generated tokens (default: 256)\n"
+            << "  --semantic-hash-prefilter    Enable SQLite semantic-hash shortlist before dense rerank\n"
+            << "  --semantic-hash-candidates <num>\n"
+            << "                               Semantic-hash shortlist size (default: 32)\n"
+            << "  --semantic-hash-max-distance <num>\n"
+            << "                               Max Hamming distance for shortlist, -1 disables the cap (default: -1)\n"
             << "  --chunk-size <num>           Chunk size for offline indexing (default: 1000)\n"
             << "  --chunk-overlap <num>        Chunk overlap for offline indexing (default: 200)\n"
             << "  --verbose, -v                Enable verbose output\n"

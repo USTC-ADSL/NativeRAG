@@ -60,6 +60,12 @@ int main(int argc, char** argv) {
               << "  Top-K: " << config.top_k << '\n'
               << "  Threads: " << config.num_threads << '\n'
               << "  Max New Tokens: " << config.max_new_tokens << '\n'
+              << "  Semantic Hash Prefilter: "
+              << (config.semantic_hash_prefilter ? "enabled" : "disabled") << '\n'
+              << "  Semantic Hash Candidates: "
+              << config.semantic_hash_candidate_limit << '\n'
+              << "  Semantic Hash Max Distance: "
+              << config.semantic_hash_max_distance << '\n'
               << "  Chunk Size: " << config.chunk_size << '\n'
               << "  Chunk Overlap: " << config.chunk_overlap << '\n';
   }
@@ -95,6 +101,10 @@ int main(int argc, char** argv) {
     RAGPipelineWithDataset pipeline(loader, embedder, index, nullptr, sqlite_db,
                                     config.top_k, config.chunk_size,
                                     config.chunk_overlap);
+    pipeline.set_semantic_hash_prefilter(
+        {config.semantic_hash_prefilter,
+         config.semantic_hash_candidate_limit,
+         config.semantic_hash_max_distance});
     // ========== 离线阶段 (Offline/Indexing Phase) ==========
     if (config.verbose) {
       std::cout << "[INFO] === OFFLINE PHASE: Building Index ===\n"
@@ -176,6 +186,10 @@ int main(int argc, char** argv) {
     RAGPipelineWithDataset pipeline(nullptr, embedder, index, llm, sqlite_db,
                                     config.top_k, config.chunk_size,
                                     config.chunk_overlap);
+    pipeline.set_semantic_hash_prefilter(
+        {config.semantic_hash_prefilter,
+         config.semantic_hash_candidate_limit,
+         config.semantic_hash_max_distance});
 
     if (config.verbose) {
       std::cout << "[INFO] === ONLINE PHASE: Query Processing ===\n"
@@ -241,6 +255,10 @@ int main(int argc, char** argv) {
     RAGPipelineWithDataset pipeline(nullptr, embedder, index, llm, sqlite_db,
                                     config.top_k, config.chunk_size,
                                     config.chunk_overlap);
+    pipeline.set_semantic_hash_prefilter(
+        {config.semantic_hash_prefilter,
+         config.semantic_hash_candidate_limit,
+         config.semantic_hash_max_distance});
 
     std::cout << "╔════════════════════════════════════════════════════════════╗\n"
               << "║    NativeRAG with Dataset - Interactive Mode              ║\n"

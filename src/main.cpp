@@ -87,6 +87,12 @@ int main(int argc, char** argv) {
               << "  Top-K: " << config.top_k << '\n'
               << "  Threads: " << config.num_threads << '\n'
               << "  Max New Tokens: " << config.max_new_tokens << '\n'
+              << "  Semantic Hash Prefilter: "
+              << (config.semantic_hash_prefilter ? "enabled" : "disabled") << '\n'
+              << "  Semantic Hash Candidates: "
+              << config.semantic_hash_candidate_limit << '\n'
+              << "  Semantic Hash Max Distance: "
+              << config.semantic_hash_max_distance << '\n'
               << "  Chunk Size: " << config.chunk_size << '\n'
               << "  Chunk Overlap: " << config.chunk_overlap << '\n';
   }
@@ -121,6 +127,10 @@ int main(int argc, char** argv) {
     // Create pipeline without LLM for offline phase
     RAGPipeline pipeline(loader, embedder, index, nullptr, sqlite_db, config.top_k,
                          config.chunk_size, config.chunk_overlap);
+    pipeline.set_semantic_hash_prefilter(
+        {config.semantic_hash_prefilter,
+         config.semantic_hash_candidate_limit,
+         config.semantic_hash_max_distance});
     if (config.data_source == CommandLineArgs::Config::DataSource::DATASET) {
       std::cerr << "[ERROR] Dataset mode is not supported in this binary. "
                    "Use main_with_dataset instead."
@@ -188,6 +198,10 @@ int main(int argc, char** argv) {
     // Create pipeline without loader for query phase
     RAGPipeline pipeline(nullptr, embedder, index, llm, sqlite_db, config.top_k,
                          config.chunk_size, config.chunk_overlap);
+    pipeline.set_semantic_hash_prefilter(
+        {config.semantic_hash_prefilter,
+         config.semantic_hash_candidate_limit,
+         config.semantic_hash_max_distance});
 
     if (config.verbose) {
       std::cout << "[INFO] === ONLINE PHASE: Query Processing ===\n"
@@ -251,6 +265,10 @@ int main(int argc, char** argv) {
     // Create pipeline without loader for interactive phase
     RAGPipeline pipeline(nullptr, embedder, index, llm, sqlite_db, config.top_k,
                          config.chunk_size, config.chunk_overlap);
+    pipeline.set_semantic_hash_prefilter(
+        {config.semantic_hash_prefilter,
+         config.semantic_hash_candidate_limit,
+         config.semantic_hash_max_distance});
 
     std::cout << "╔════════════════════════════════════════════════════════════╗\n"
               << "║         NativeRAG - Interactive Mode                       ║\n"
