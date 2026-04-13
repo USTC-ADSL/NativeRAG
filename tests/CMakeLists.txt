@@ -122,6 +122,15 @@ target_include_directories(test_command_line_args PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
 )
 
+add_executable(test_query_file_loader
+    ${CMAKE_CURRENT_SOURCE_DIR}/test_query_file_loader.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/cli/QueryFileLoader.cpp
+)
+
+target_include_directories(test_query_file_loader PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+)
+
 add_executable(test_llama_logging
     ${CMAKE_CURRENT_SOURCE_DIR}/test_llama_logging.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/llm/LlamaCppLogging.cpp
@@ -397,6 +406,7 @@ endif()
 # Enable testing
 enable_testing()
 add_test(NAME CommandLineArgsTest COMMAND $<TARGET_FILE:test_command_line_args>)
+add_test(NAME QueryFileLoaderTest COMMAND $<TARGET_FILE:test_query_file_loader>)
 add_test(NAME LlamaLoggingTest COMMAND $<TARGET_FILE:test_llama_logging>)
 add_test(NAME PromptUtilsTest COMMAND $<TARGET_FILE:test_prompt_utils>)
 add_test(NAME EvidenceFeaturesTest COMMAND $<TARGET_FILE:test_evidence_features>)
@@ -413,6 +423,7 @@ add_test(NAME RAGIntegrationTest COMMAND $<TARGET_FILE:test_rag_integration>)
 # Set test properties
 set_tests_properties(
     CommandLineArgsTest
+    QueryFileLoaderTest
     LlamaLoggingTest
     PromptUtilsTest
     EvidenceFeaturesTest
@@ -441,6 +452,7 @@ if(USE_PREBUILT)
 endif()
 
 message(STATUS "Tests configured:")
+message(STATUS "  - test_query_file_loader (batch query file parsing)")
 message(STATUS "  - test_prompt_utils (generation output cleanup)")
 message(STATUS "  - test_evidence_features (evidence feature extraction)")
 message(STATUS "  - test_semantic_hashing (Group C - semantic hash)")

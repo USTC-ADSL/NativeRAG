@@ -46,6 +46,7 @@ class CommandLineArgs {
     std::string dataset_path;
     std::string input_file;
     std::string query;
+    std::string query_file_path;
     std::string output_file;
     std::string state_snapshot_in_path;
     std::string state_snapshot_out_path;

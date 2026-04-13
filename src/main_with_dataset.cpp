@@ -6,6 +6,7 @@
 
 #include "RAGPipelineWithDataset.hpp"
 #include "cli/CommandLineArgs.hpp"
+#include "cli/QueryFileLoader.hpp"
 
 #include "loader/TextFileLoader.hpp"
 #include "embedding/MNNEmbedding.hpp"
@@ -88,6 +89,10 @@ int main(int argc, char** argv) {
               << "  Query Summary CSV Out: "
               << (config.query_summary_csv_out_path.empty() ? "(none)"
                                                             : config.query_summary_csv_out_path)
+              << '\n'
+              << "  Query File: "
+              << (config.query_file_path.empty() ? "(none)"
+                                                : config.query_file_path)
               << '\n'
               << "  Chunk Size: " << config.chunk_size << '\n'
               << "  Chunk Overlap: " << config.chunk_overlap << '\n';
@@ -202,6 +207,18 @@ int main(int argc, char** argv) {
     // Only need: embedder, index, llm
     // No need for: loader
 
+    std::vector<std::string> queries;
+    if (config.query_file_path.empty()) {
+      queries.push_back(config.query);
+    } else {
+      queries = load_query_file(config.query_file_path);
+      if (queries.empty()) {
+        std::cerr << "[ERROR] Query file did not contain any runnable queries: "
+                  << config.query_file_path << '\n';
+        return 1;
+      }
+    }
+
     auto embedder = std::make_shared<MNNEmbedding>();
     auto index = std::make_shared<FaissIndex>(config.faiss_index_type,
                                               faiss::METRIC_INNER_PRODUCT);
@@ -247,9 +264,14 @@ int main(int argc, char** argv) {
          config.semantic_hash_max_distance});
 
     if (config.verbose) {
-      std::cout << "[INFO] === ONLINE PHASE: Query Processing ===\n"
-                << "[INFO] Query: " << config.query << '\n'
-                << "[INFO] Index path: " << config.index_path << '\n';
+      std::cout << "[INFO] === ONLINE PHASE: Query Processing ===\n";
+      if (config.query_file_path.empty()) {
+        std::cout << "[INFO] Query: " << config.query << '\n';
+      } else {
+        std::cout << "[INFO] Query file: " << config.query_file_path << '\n'
+                  << "[INFO] Batch query count: " << queries.size() << '\n';
+      }
+      std::cout << "[INFO] Index path: " << config.index_path << '\n';
     }
 
     // Load index from disk
@@ -274,41 +296,59 @@ int main(int argc, char** argv) {
                 << config.state_snapshot_in_path << '\n';
     }
 
-    // Step 4-7: Query embedding, search, context retrieval, and LLM inference
-    if (config.verbose) {
-      std::cout << "[INFO] Processing query: " << config.query << '\n';
-    }
-    std::string answer = pipeline.answer_query(config.query);
-    std::cout << answer << '\n';
-
-    if (!config.query_trace_out_path.empty()) {
-      if (!pipeline.export_last_query_trace(config.query_trace_out_path)) {
-        std::cerr << "[ERROR] Failed to export query trace: "
+    auto export_query_artifacts = [&]() -> bool {
+      if (!config.query_trace_out_path.empty()) {
+        if (!pipeline.export_last_query_trace(config.query_trace_out_path)) {
+          std::cerr << "[ERROR] Failed to export query trace: "
+                    << config.query_trace_out_path << '\n';
+          return false;
+        }
+        std::cout << "✓ Query trace exported to: "
                   << config.query_trace_out_path << '\n';
-        return 1;
       }
-      std::cout << "✓ Query trace exported to: "
-                << config.query_trace_out_path << '\n';
-    }
 
-    if (!config.query_trace_jsonl_out_path.empty()) {
-      if (!pipeline.append_last_query_trace_jsonl(config.query_trace_jsonl_out_path)) {
-        std::cerr << "[ERROR] Failed to append query trace JSONL: "
+      if (!config.query_trace_jsonl_out_path.empty()) {
+        if (!pipeline.append_last_query_trace_jsonl(config.query_trace_jsonl_out_path)) {
+          std::cerr << "[ERROR] Failed to append query trace JSONL: "
+                    << config.query_trace_jsonl_out_path << '\n';
+          return false;
+        }
+        std::cout << "✓ Query trace JSONL appended to: "
                   << config.query_trace_jsonl_out_path << '\n';
-        return 1;
       }
-      std::cout << "✓ Query trace JSONL appended to: "
-                << config.query_trace_jsonl_out_path << '\n';
-    }
 
-    if (!config.query_summary_csv_out_path.empty()) {
-      if (!pipeline.append_last_query_trace_summary_csv(config.query_summary_csv_out_path)) {
-        std::cerr << "[ERROR] Failed to append query summary CSV: "
+      if (!config.query_summary_csv_out_path.empty()) {
+        if (!pipeline.append_last_query_trace_summary_csv(config.query_summary_csv_out_path)) {
+          std::cerr << "[ERROR] Failed to append query summary CSV: "
+                    << config.query_summary_csv_out_path << '\n';
+          return false;
+        }
+        std::cout << "✓ Query summary CSV appended to: "
                   << config.query_summary_csv_out_path << '\n';
+      }
+
+      return true;
+    };
+
+    // Step 4-7: Query embedding, search, context retrieval, and LLM inference
+    for (size_t query_index = 0; query_index < queries.size(); ++query_index) {
+      const auto& query = queries[query_index];
+      if (config.verbose) {
+        if (queries.size() == 1) {
+          std::cout << "[INFO] Processing query: " << query << '\n';
+        } else {
+          std::cout << "[INFO] Processing batch query "
+                    << (query_index + 1) << "/" << queries.size()
+                    << ": " << query << '\n';
+        }
+      }
+
+      std::string answer = pipeline.answer_query(query);
+      std::cout << answer << '\n';
+
+      if (!export_query_artifacts()) {
         return 1;
       }
-      std::cout << "✓ Query summary CSV appended to: "
-                << config.query_summary_csv_out_path << '\n';
     }
 
     if (!config.state_snapshot_out_path.empty()) {

@@ -11,9 +11,11 @@ This patch adds explicit per-query export paths so experiments can persist the f
 - `--query` now accepts an optional `--query-trace-out <path>` flag.
 - `--query` now accepts an optional `--query-trace-jsonl-out <path>` flag.
 - `--query` now accepts an optional `--query-summary-csv-out <path>` flag.
+- `--query` now also supports `--query-file <path>` batch mode for append-friendly exports.
 - After a successful query run, the CLI can export the final query trace as JSON.
 - After a successful query run, the CLI can append the final query trace as one JSONL row.
 - After a successful query run, the CLI can also append a flat CSV summary row for batch analysis.
+- In batch query-file mode, JSONL and CSV append once per query while single-file JSON export stays disabled.
 - `RAGPipeline` now keeps the most recent query trace in memory and exposes it through:
   - `last_query_trace()`
   - `export_last_query_trace(...)`
@@ -53,6 +55,8 @@ This patch adds explicit per-query export paths so experiments can persist the f
   - JSON export keeps the full structured artifact
   - JSONL export appends one compact structured row per query
   - CSV export appends a single flat row and writes the header automatically when the file is new
+  - when `--query-file` is used, JSONL and CSV append after each query in the file
+  - when `--query-file` is used, `--query-trace-out` is rejected to avoid ambiguous multi-query JSON output
 
 ## Main files / modules touched
 
@@ -80,7 +84,11 @@ This patch adds explicit per-query export paths so experiments can persist the f
    - the CLI calls `append_last_query_trace_summary_csv(...)`
    - the final query trace is flattened into one CSV row
    - the header is emitted automatically on first write
-7. Snapshot export and trace export remain separate:
+7. If `--query-file` is set:
+   - the CLI runs the normal query path once per runnable line in the file
+   - JSONL and CSV append once per query
+   - single-file JSON export remains disabled for that invocation
+8. Snapshot export and trace export remain separate:
    - snapshot export persists SQLite chunk-state tables
    - query trace export persists the final query-level decision artifact
    - query trace JSONL persists one structured row per query
@@ -92,14 +100,17 @@ This patch adds explicit per-query export paths so experiments can persist the f
   - default: disabled
   - supported only for `--query`
   - writes a JSON file for the most recent query
+  - not supported together with `--query-file`
 - `--query-trace-jsonl-out <path>`
   - default: disabled
   - supported only for `--query`
   - appends a compact JSON line for the most recent query
+  - in `--query-file` mode, appends once per query
 - `--query-summary-csv-out <path>`
   - default: disabled
   - supported only for `--query`
   - appends a CSV summary row for the most recent query
+  - in `--query-file` mode, appends once per query
 
 The trace uses existing runtime thresholds and flags. This patch does not add new controller thresholds.
 
@@ -176,6 +187,6 @@ This patch also adds a flat CSV artifact intended for aggregation across many qu
 
 - `--query-trace-out` currently supports only single `--query` runs, not interactive multi-turn sessions.
 - The JSON is written manually and intentionally stays small; it is not yet a full replay bundle.
-- JSONL append still requires the caller to invoke the CLI once per query; there is no built-in multi-query driver yet.
+- JSONL and CSV now support built-in `--query-file` batch accumulation, but the CLI still does not emit a structured answer bundle for the full batch.
 - The trace captures final query results, not intermediate candidate lists before rerank.
 - The CSV is intentionally flat and only includes the top-level summary plus top-1 result fields; it is not a full replay bundle.

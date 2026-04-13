@@ -54,6 +54,8 @@ CommandLineArgs::Command CommandLineArgs::parse_command(const std::string& cmd) 
 }
 
 bool CommandLineArgs::parse_options() {
+  std::vector<std::string> query_tokens;
+
   for (int i = 2; i < argc_; ++i) {
     std::string arg = argv_[i];
 
@@ -87,6 +89,8 @@ bool CommandLineArgs::parse_options() {
       }
     } else if (arg == "--output" && i + 1 < argc_) {
       config_.output_file = argv_[++i];
+    } else if (arg == "--query-file" && i + 1 < argc_) {
+      config_.query_file_path = argv_[++i];
     } else if (arg == "--state-snapshot-in" && i + 1 < argc_) {
       config_.state_snapshot_in_path = argv_[++i];
     } else if (arg == "--state-snapshot-out" && i + 1 < argc_) {
@@ -136,19 +140,18 @@ bool CommandLineArgs::parse_options() {
         } else {
           config_.text_path = arg;
         }
-      } else if (config_.command == Command::QUERY && config_.query.empty()) {
-        config_.query = arg;
+      } else if (config_.command == Command::QUERY) {
+        query_tokens.push_back(arg);
       }
     }
   }
 
-  // For QUERY command, join remaining args as query string
-  if (config_.command == Command::QUERY && config_.query.empty()) {
-    for (int i = 2; i < argc_; ++i) {
-      if (argv_[i][0] != '-') {
-        if (!config_.query.empty()) config_.query += ' ';
-        config_.query += argv_[i];
+  if (config_.command == Command::QUERY && !query_tokens.empty()) {
+    for (const auto& token : query_tokens) {
+      if (!config_.query.empty()) {
+        config_.query += ' ';
       }
+      config_.query += token;
     }
   }
 
@@ -214,9 +217,21 @@ bool CommandLineArgs::validate_config() {
     }
   } else if (config_.command == Command::QUERY) {
     // QUERY phase: needs both embedding model and LLM
-    if (config_.query.empty()) {
-      std::cerr << "Error: --query requires a query string\n";
+    const bool has_inline_query = !config_.query.empty();
+    const bool has_query_file = !config_.query_file_path.empty();
+    if (has_inline_query == has_query_file) {
+      std::cerr << "Error: --query requires exactly one inline query or --query-file\n";
       return false;
+    }
+    if (has_query_file) {
+      if (!std::filesystem::exists(config_.query_file_path)) {
+        std::cerr << "Error: query file path not found: " << config_.query_file_path << '\n';
+        return false;
+      }
+      if (!config_.query_trace_out_path.empty()) {
+        std::cerr << "Error: --query-trace-out is not supported with --query-file\n";
+        return false;
+      }
     }
 
     // Validate LLM model for QUERY phase
@@ -272,6 +287,12 @@ bool CommandLineArgs::validate_config() {
       !std::filesystem::exists(config_.state_snapshot_in_path)) {
     std::cerr << "Error: state snapshot path not found: "
               << config_.state_snapshot_in_path << '\n';
+    return false;
+  }
+
+  if (!config_.query_file_path.empty() &&
+      config_.command != Command::QUERY) {
+    std::cerr << "Error: --query-file is only supported for --query\n";
     return false;
   }
 
@@ -341,6 +362,8 @@ void CommandLineArgs::print_usage() const {
             << "Commands:\n"
             << "  --build <path>        Build index from txt file/dir or dataset file\n"
             << "  --query <question>    Query the RAG system\n"
+            << "  --query --query-file <path>\n"
+            << "                       Run query mode for each line in a file\n"
             << "  --interactive, -i     Interactive mode\n"
             << "  --help, -h            Show this help message\n";
 }
@@ -374,6 +397,8 @@ void CommandLineArgs::print_help() const {
             << "COMMANDS:\n"
             << "  --build <file>        Build vector index from document file (Offline Phase)\n"
             << "  --query <question>    Query the RAG system with a question (Online Phase)\n"
+            << "  --query --query-file <path>\n"
+            << "                        Run query mode once per non-empty line in a file\n"
             << "  --interactive, -i     Start interactive mode (Online Phase)\n"
             << "  --help, -h            Show this help message\n\n"
             << "REQUIRED OPTIONS BY COMMAND:\n"
@@ -392,6 +417,7 @@ void CommandLineArgs::print_help() const {
             << "  --output <file>              Output file for results\n"
             << "  --state-snapshot-in <path>   Restore chunk-state snapshot before execution\n"
             << "  --state-snapshot-out <path>  Export chunk-state snapshot after execution\n"
+            << "  --query-file <path>         Load one query per line for batch query mode\n"
             << "  --query-trace-out <path>     Export the final query trace as JSON (query mode only)\n"
             << "  --query-trace-jsonl-out <path>\n"
             << "                               Append the final query trace as one JSONL row (query mode only)\n"
@@ -426,6 +452,12 @@ void CommandLineArgs::print_help() const {
             << "  mobile_rag --query \"What is AI?\" \\\n"
             << "             --llm-model ./models/llm/model.gguf \\\n"
             << "             --embedding-model ./models/emb/config.json\n\n"
+            << "  # Stage 2: Batch query file with append-friendly exports\n"
+            << "  mobile_rag --query --query-file queries.txt \\\n"
+            << "             --llm-model ./models/llm/model.gguf \\\n"
+            << "             --embedding-model ./models/emb/config.json \\\n"
+            << "             --query-trace-jsonl-out /tmp/query-trace.jsonl \\\n"
+            << "             --query-summary-csv-out /tmp/query-summary.csv\n\n"
             << "  # Stage 2: Interactive mode (needs both embedding and LLM models)\n"
             << "  mobile_rag --interactive --verbose --top-k 10 \\\n"
             << "             --llm-model ./models/llm/model.gguf \\\n"
