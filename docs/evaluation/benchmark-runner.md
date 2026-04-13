@@ -14,6 +14,10 @@ This patch adds a small outer-loop benchmark runner that drives those existing e
   - `dense_only`
   - `static_tiered`
   - `adaptive_graph`
+- Additional optional presets now exist for Phase 5 ablations:
+  - `dense_only_state_aware`
+  - `state_aware_tiered`
+  - `adaptive_state_aware`
 - Each preset produces its own artifact bundle under the selected output directory:
   - query trace JSONL
   - query summary CSV
@@ -35,8 +39,11 @@ This patch adds a small outer-loop benchmark runner that drives those existing e
   - device execution through `adb`, with artifact pull-back into the local output directory
 - Preset selection is explicit and maps to existing query-time flags:
   - `dense_only`: no retrieval prefilter flags
+  - `dense_only_state_aware`: `--state-aware-dense`
   - `static_tiered`: `--lexical-prefilter --semantic-hash-prefilter`
+  - `state_aware_tiered`: `--lexical-prefilter --semantic-hash-prefilter --state-aware-dense`
   - `adaptive_graph`: `--lexical-prefilter --semantic-hash-prefilter --adaptive-graph`
+  - `adaptive_state_aware`: `--lexical-prefilter --semantic-hash-prefilter --adaptive-graph --state-aware-dense`
 - Each run reuses the same shared query/model/index inputs, which keeps baseline comparisons aligned.
 - If `--state-snapshot-in` is provided, the same input snapshot is reused for every preset so replay and ablation runs start from the same saved state.
 - In device mode the runner first checks `adb devices`, requires the selected serial to be in `device` state, runs the remote CLI once per preset, and pulls the generated artifacts back before summarizing them.
@@ -85,6 +92,7 @@ This patch adds a small outer-loop benchmark runner that drives those existing e
   - `--remote-workdir <path>`
     - required in device mode; remote directory used for per-run outputs
   - `--preset <name>` repeated; default is `dense_only`, `static_tiered`, `adaptive_graph`
+    - additional optional names: `dense_only_state_aware`, `state_aware_tiered`, `adaptive_state_aware`
   - `--top-k <num>`
   - `--threads <num>`
   - `--max-new-tokens <num>`
@@ -116,10 +124,12 @@ The runner writes evaluation artifacts beside existing JSONL / CSV / snapshot ou
 - `summary.json` and `summary.csv` add one row/object per preset with:
   - `query_count`
   - `escalation_count`
+  - `state_aware_dense_query_count`
   - `p50_total_ms`
   - `p95_total_ms`
   - `average_total_ms`
   - `average_coverage_ratio`
+  - `average_state_filtered_candidate_count`
   - `max_peak_rss_kb`
   - per-run artifact paths
 - `manifest.json` adds:
@@ -152,6 +162,8 @@ The runner writes evaluation artifacts beside existing JSONL / CSV / snapshot ou
    - `python3 tools/run_benchmark_matrix.py --replay-manifest /tmp/native_rag_bench/manifest.json --output-dir /tmp/native_rag_bench_replay`
 6. Run the matrix on the default device serial when the inputs are already deployed remotely:
    - `python3 tools/run_benchmark_matrix.py --adb-serial fd8657d6 --remote-workdir /data/local/tmp/nativerag-bench --binary /data/local/tmp/nativerag-check/mobile_rag_cli --query-file /data/local/tmp/nativerag-check/runtime/query_batch.txt --llm-model /data/local/tmp/nativerag-check/models/Qwen3-4B-Q8_0.gguf --embedding-model /data/local/tmp/nativerag-check/models/Qwen3-0.6B-Embedding/config.json --sqlite-db /data/local/tmp/nativerag-check/runtime/state_demote.sqlite3 --index-path /data/local/tmp/nativerag-check/runtime/state_demote.faiss --state-snapshot-in /data/local/tmp/nativerag-check/runtime/state_demote_hot2.snapshot.tsv --output-dir /tmp/native_rag_bench_device`
+7. Run a Phase 5 state-aware ablation bundle:
+   - `python3 tools/run_benchmark_matrix.py --binary ./build_progress_check/mobile_rag_cli --query-file ./queries.txt --llm-model <gguf> --embedding-model <emb-config> --sqlite-db <sqlite.db> --index-path <faiss.index> --state-snapshot-in <snapshot.tsv> --output-dir /tmp/native_rag_bench_state --preset dense_only_state_aware --preset state_aware_tiered --preset adaptive_state_aware`
 
 ## Known limitations / TODOs
 
@@ -159,3 +171,4 @@ The runner writes evaluation artifacts beside existing JSONL / CSV / snapshot ou
 - Device mode assumes the CLI binary, query file, models, and index inputs are already present on the target device; it does not push them automatically.
 - The summary only surfaces metrics already present in per-run batch reports; it does not compute deeper citation metrics itself.
 - Presets are fixed and heuristic for now; there is no external experiment spec file yet.
+- The default preset list still prioritizes the original baseline trio; state-aware presets must be requested explicitly.

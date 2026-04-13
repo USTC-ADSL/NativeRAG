@@ -24,8 +24,10 @@ void test_batch_query_report_exports_aggregate_json() {
   sqlite_trace.final_graph = "lexical_prefilter";
   sqlite_trace.fallback_reason = "none";
   sqlite_trace.escalated = false;
+  sqlite_trace.state_aware_dense_enabled = true;
   sqlite_trace.lexical_candidate_count = 2;
   sqlite_trace.hash_candidate_count = 0;
+  sqlite_trace.state_filtered_candidate_count = 2;
   sqlite_trace.dense_result_count = 1;
   sqlite_trace.promoted_to_hot = 1;
   sqlite_trace.demoted_to_warm = 1;
@@ -51,8 +53,10 @@ void test_batch_query_report_exports_aggregate_json() {
   faiss_trace.final_graph = "dense_only";
   faiss_trace.fallback_reason = "dense_fallback";
   faiss_trace.escalated = true;
+  faiss_trace.state_aware_dense_enabled = false;
   faiss_trace.lexical_candidate_count = 0;
   faiss_trace.hash_candidate_count = 1;
+  faiss_trace.state_filtered_candidate_count = 0;
   faiss_trace.dense_result_count = 1;
   faiss_trace.promoted_to_hot = 1;
   faiss_trace.demoted_to_warm = 0;
@@ -83,7 +87,9 @@ void test_batch_query_report_exports_aggregate_json() {
   assert(json.find("\"lexical_prefilter\": 2") != std::string::npos);
   assert(json.find("\"dense_only\": 1") != std::string::npos);
   assert(json.find("\"dense_fallback\": 1") != std::string::npos);
+  assert(json.find("\"state_aware_dense_query_count\": 1") != std::string::npos);
   assert(json.find("\"coverage_ratio\": 0.5") != std::string::npos);
+  assert(json.find("\"state_filtered_candidate_count\": 1") != std::string::npos);
   assert(json.find("\"promoted_to_hot\": 2") != std::string::npos);
   assert(json.find("\"query_embedding_ms\": 2") != std::string::npos);
   assert(json.find("\"retrieval_ms\": 3") != std::string::npos);

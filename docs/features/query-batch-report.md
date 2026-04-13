@@ -16,11 +16,13 @@ This patch adds a lightweight aggregate JSON report for `--query` runs, especial
 - The aggregate report currently includes:
   - total query count
   - escalation count
+  - how many queries ran with `state_aware_dense`
   - initial graph distribution
   - final graph distribution
   - fallback-reason distribution
   - promotion / demotion totals
   - average top score, score margin, coverage ratio, and candidate counts
+  - average state-filtered candidate count
   - average query-stage timing metrics
   - P50 / P95 timing and peak-RSS percentiles from the per-query samples
   - average and maximum peak RSS proxy
@@ -33,6 +35,9 @@ This patch adds a lightweight aggregate JSON report for `--query` runs, especial
   - create one report accumulator per invocation
   - record each completed query trace after `answer_query(...)`
   - export the aggregate JSON after all queries finish
+- The batch report now aggregates Phase 5 state-aware metrics from each trace:
+  - `state_aware_dense_query_count`
+  - average `state_filtered_candidate_count`
 - the batch report now keeps the first query's runtime metadata as the invocation snapshot and aggregates timing / RSS fields across all queries
 - the batch report now also keeps per-query timing / RSS samples so it can export deterministic `p50` and `p95` percentile summaries directly in JSON
 - `src/cli/CommandLineArgs.cpp` now parses and validates:
@@ -88,9 +93,11 @@ The aggregate report is a standalone JSON artifact and does not change SQLite, F
 This patch adds one aggregate JSON artifact with:
 
 - query-count level totals
+- state-aware query-count totals
 - graph-selection distributions
 - fallback-reason distributions
 - average evidence and shortlist metrics
+- average state-filtered candidate count
 - average timing metrics
 - P50 / P95 timing percentiles
 - P50 / P95 peak RSS percentiles
@@ -111,11 +118,13 @@ No new hot-path stdout log family is added.
    - `mobile_rag --query --query-file queries.txt --llm-model <gguf> --embedding-model <emb-config> --query-trace-jsonl-out /tmp/query-trace.jsonl --query-summary-csv-out /tmp/query-summary.csv --query-batch-report-out /tmp/query-batch-report.json ...`
 5. Confirm the report contains:
    - `query_count`
+   - `state_aware_dense_query_count`
    - `initial_graph_counts`
    - `final_graph_counts`
    - `fallback_reason_counts`
    - `totals`
    - `averages`
+   - `averages.state_filtered_candidate_count`
    - `percentiles.p50`
    - `percentiles.p95`
 

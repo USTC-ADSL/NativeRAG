@@ -97,6 +97,9 @@ void BatchQueryReport::record(const RAGPipeline::QueryTrace& trace) {
   if (trace.escalated) {
     ++escalation_count_;
   }
+  if (trace.state_aware_dense_enabled) {
+    ++state_aware_dense_query_count_;
+  }
   if (!has_runtime_metadata_) {
     runtime_metadata_ = trace.runtime;
     has_runtime_metadata_ = true;
@@ -109,6 +112,8 @@ void BatchQueryReport::record(const RAGPipeline::QueryTrace& trace) {
   coverage_ratio_sum_ += trace.evidence.coverage_ratio;
   lexical_candidate_count_sum_ += static_cast<double>(trace.lexical_candidate_count);
   hash_candidate_count_sum_ += static_cast<double>(trace.hash_candidate_count);
+  state_filtered_candidate_count_sum_ +=
+      static_cast<double>(trace.state_filtered_candidate_count);
   dense_result_count_sum_ += static_cast<double>(trace.dense_result_count);
   query_embedding_ms_sum_ += trace.timing.query_embedding_ms;
   retrieval_ms_sum_ += trace.timing.retrieval_ms;
@@ -148,6 +153,7 @@ bool BatchQueryReport::export_json(const std::string& output_path) const {
   json << "{\n"
        << "  \"query_count\": " << query_count_ << ",\n"
        << "  \"escalation_count\": " << escalation_count_ << ",\n"
+       << "  \"state_aware_dense_query_count\": " << state_aware_dense_query_count_ << ",\n"
        << "  \"runtime\": {\n"
        << "    \"llm_backend\": \"" << json_escape(runtime_metadata_.llm_backend) << "\",\n"
        << "    \"embedding_backend\": \"" << json_escape(runtime_metadata_.embedding_backend) << "\",\n"
@@ -218,6 +224,8 @@ bool BatchQueryReport::export_json(const std::string& output_path) const {
        << "    \"coverage_ratio\": " << (coverage_ratio_sum_ / query_count) << ",\n"
        << "    \"lexical_candidate_count\": " << (lexical_candidate_count_sum_ / query_count) << ",\n"
        << "    \"hash_candidate_count\": " << (hash_candidate_count_sum_ / query_count) << ",\n"
+       << "    \"state_filtered_candidate_count\": "
+       << (state_filtered_candidate_count_sum_ / query_count) << ",\n"
        << "    \"dense_result_count\": " << (dense_result_count_sum_ / query_count) << ",\n"
        << "    \"query_embedding_ms\": " << (query_embedding_ms_sum_ / query_count) << ",\n"
        << "    \"retrieval_ms\": " << (retrieval_ms_sum_ / query_count) << ",\n"

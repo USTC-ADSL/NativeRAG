@@ -17,6 +17,7 @@ class BatchQueryReport {
  private:
   size_t query_count_ = 0;
   size_t escalation_count_ = 0;
+  size_t state_aware_dense_query_count_ = 0;
   bool has_runtime_metadata_ = false;
   int promoted_to_hot_total_ = 0;
   int demoted_to_warm_total_ = 0;
@@ -25,6 +26,7 @@ class BatchQueryReport {
   double coverage_ratio_sum_ = 0.0;
   double lexical_candidate_count_sum_ = 0.0;
   double hash_candidate_count_sum_ = 0.0;
+  double state_filtered_candidate_count_sum_ = 0.0;
   double dense_result_count_sum_ = 0.0;
   double query_embedding_ms_sum_ = 0.0;
   double retrieval_ms_sum_ = 0.0;

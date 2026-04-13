@@ -14,11 +14,23 @@ from typing import Dict, Iterable, List
 
 PRESET_FLAGS: Dict[str, List[str]] = {
     "dense_only": [],
+    "dense_only_state_aware": ["--state-aware-dense"],
     "static_tiered": ["--lexical-prefilter", "--semantic-hash-prefilter"],
+    "state_aware_tiered": [
+        "--lexical-prefilter",
+        "--semantic-hash-prefilter",
+        "--state-aware-dense",
+    ],
     "adaptive_graph": [
         "--lexical-prefilter",
         "--semantic-hash-prefilter",
         "--adaptive-graph",
+    ],
+    "adaptive_state_aware": [
+        "--lexical-prefilter",
+        "--semantic-hash-prefilter",
+        "--adaptive-graph",
+        "--state-aware-dense",
     ],
 }
 
@@ -381,8 +393,14 @@ def run_matrix(shared_config: dict, output_dir: Path) -> tuple[dict, dict]:
                 "preset": preset,
                 "query_count": batch_report["query_count"],
                 "escalation_count": batch_report["escalation_count"],
+                "state_aware_dense_query_count": batch_report.get(
+                    "state_aware_dense_query_count", 0
+                ),
                 "average_total_ms": batch_report["averages"]["total_ms"],
                 "average_coverage_ratio": batch_report["averages"]["coverage_ratio"],
+                "average_state_filtered_candidate_count": batch_report["averages"].get(
+                    "state_filtered_candidate_count", 0.0
+                ),
                 "p50_total_ms": batch_report.get("percentiles", {})
                 .get("p50", {})
                 .get("total_ms", 0.0),
@@ -434,10 +452,12 @@ def write_summary_csv(summary: dict, output_path: Path) -> None:
                 "preset",
                 "query_count",
                 "escalation_count",
+                "state_aware_dense_query_count",
                 "p50_total_ms",
                 "p95_total_ms",
                 "average_total_ms",
                 "average_coverage_ratio",
+                "average_state_filtered_candidate_count",
                 "max_peak_rss_kb",
                 "batch_report_path",
                 "trace_jsonl_path",
@@ -451,10 +471,12 @@ def write_summary_csv(summary: dict, output_path: Path) -> None:
                     run["preset"],
                     run["query_count"],
                     run["escalation_count"],
+                    run["state_aware_dense_query_count"],
                     run["p50_total_ms"],
                     run["p95_total_ms"],
                     run["average_total_ms"],
                     run["average_coverage_ratio"],
+                    run["average_state_filtered_candidate_count"],
                     run["max_peak_rss_kb"],
                     run["batch_report_path"],
                     run["trace_jsonl_path"],

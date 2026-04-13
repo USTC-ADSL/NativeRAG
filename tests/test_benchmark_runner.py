@@ -38,15 +38,28 @@ batch_report = take_arg("--query-batch-report-out")
 snapshot_out = take_arg("--state-snapshot-out")
 
 preset = "dense_only"
-if "--adaptive-graph" in sys.argv:
+if "--adaptive-graph" in sys.argv and "--state-aware-dense" in sys.argv:
+    preset = "adaptive_state_aware"
+elif "--adaptive-graph" in sys.argv:
     preset = "adaptive_graph"
+elif (
+    "--lexical-prefilter" in sys.argv
+    and "--semantic-hash-prefilter" in sys.argv
+    and "--state-aware-dense" in sys.argv
+):
+    preset = "state_aware_tiered"
 elif "--lexical-prefilter" in sys.argv and "--semantic-hash-prefilter" in sys.argv:
     preset = "static_tiered"
+elif "--state-aware-dense" in sys.argv:
+    preset = "dense_only_state_aware"
 
 metrics = {
-    "dense_only": {"escalation_count": 0, "total_ms": 42.0, "coverage_ratio": 0.25, "peak_rss_kb": 1000, "p50_total_ms": 40.0, "p95_total_ms": 44.0},
-    "static_tiered": {"escalation_count": 0, "total_ms": 30.0, "coverage_ratio": 0.55, "peak_rss_kb": 1200, "p50_total_ms": 29.0, "p95_total_ms": 31.0},
-    "adaptive_graph": {"escalation_count": 1, "total_ms": 24.0, "coverage_ratio": 0.80, "peak_rss_kb": 1400, "p50_total_ms": 23.0, "p95_total_ms": 25.0},
+    "dense_only": {"escalation_count": 0, "total_ms": 42.0, "coverage_ratio": 0.25, "peak_rss_kb": 1000, "p50_total_ms": 40.0, "p95_total_ms": 44.0, "state_aware_dense_query_count": 0, "state_filtered_candidate_count": 0.0},
+    "dense_only_state_aware": {"escalation_count": 0, "total_ms": 39.0, "coverage_ratio": 0.35, "peak_rss_kb": 980, "p50_total_ms": 38.0, "p95_total_ms": 41.0, "state_aware_dense_query_count": 1, "state_filtered_candidate_count": 2.0},
+    "static_tiered": {"escalation_count": 0, "total_ms": 30.0, "coverage_ratio": 0.55, "peak_rss_kb": 1200, "p50_total_ms": 29.0, "p95_total_ms": 31.0, "state_aware_dense_query_count": 0, "state_filtered_candidate_count": 0.0},
+    "state_aware_tiered": {"escalation_count": 0, "total_ms": 27.0, "coverage_ratio": 0.63, "peak_rss_kb": 1180, "p50_total_ms": 26.0, "p95_total_ms": 29.0, "state_aware_dense_query_count": 1, "state_filtered_candidate_count": 1.5},
+    "adaptive_graph": {"escalation_count": 1, "total_ms": 24.0, "coverage_ratio": 0.80, "peak_rss_kb": 1400, "p50_total_ms": 23.0, "p95_total_ms": 25.0, "state_aware_dense_query_count": 0, "state_filtered_candidate_count": 0.0},
+    "adaptive_state_aware": {"escalation_count": 1, "total_ms": 22.0, "coverage_ratio": 0.84, "peak_rss_kb": 1350, "p50_total_ms": 21.0, "p95_total_ms": 23.0, "state_aware_dense_query_count": 1, "state_filtered_candidate_count": 1.0},
 }[preset]
 
 queries = [line.strip() for line in Path(query_file).read_text(encoding="utf-8").splitlines() if line.strip()]
@@ -56,6 +69,7 @@ Path(snapshot_out).write_text("STATE_SNAPSHOT_V1\\n", encoding="utf-8")
 Path(batch_report).write_text(json.dumps({
     "query_count": len(queries),
     "escalation_count": metrics["escalation_count"],
+    "state_aware_dense_query_count": metrics["state_aware_dense_query_count"],
     "runtime": {
         "llm_backend": "FakeLLM",
         "embedding_backend": "FakeEmbedding",
@@ -84,6 +98,7 @@ Path(batch_report).write_text(json.dumps({
         "coverage_ratio": metrics["coverage_ratio"],
         "lexical_candidate_count": 2.0,
         "hash_candidate_count": 1.0,
+        "state_filtered_candidate_count": metrics["state_filtered_candidate_count"],
         "dense_result_count": 1.0,
         "query_embedding_ms": 1.0,
         "retrieval_ms": 2.0,
@@ -230,7 +245,9 @@ def test_runs_matrix_and_writes_manifest(temp_root: Path) -> None:
     assert summary_json["runs"][2]["p95_total_ms"] == 25.0
 
     summary_csv_lines = (output_dir / "summary.csv").read_text(encoding="utf-8").splitlines()
-    assert summary_csv_lines[0].startswith("preset,query_count,escalation_count,p50_total_ms,p95_total_ms")
+    assert summary_csv_lines[0].startswith(
+        "preset,query_count,escalation_count,state_aware_dense_query_count,p50_total_ms,p95_total_ms"
+    )
     assert len(summary_csv_lines) == 4
 
     manifest = json.loads((output_dir / "manifest.json").read_text(encoding="utf-8"))
@@ -368,12 +385,89 @@ def test_runs_matrix_via_fake_adb_device(temp_root: Path) -> None:
     assert manifest["shared_config"]["remote_workdir"] == "/remote/bench"
 
 
+def test_accepts_state_aware_presets(temp_root: Path) -> None:
+    fake_cli = temp_root / "fake_mobile_rag_cli.py"
+    write_fake_cli(fake_cli)
+
+    query_file = temp_root / "queries.txt"
+    write_text(query_file, "what is sqlite?\n")
+
+    llm_model = temp_root / "fake.gguf"
+    embedding_model = temp_root / "embedding-config.json"
+    sqlite_db = temp_root / "rag.sqlite3"
+    index_path = temp_root / "rag.faiss"
+    state_snapshot_in = temp_root / "state.snapshot.tsv"
+    for path in (llm_model, embedding_model, sqlite_db, index_path, state_snapshot_in):
+        write_text(path, "stub\n")
+
+    output_dir = temp_root / "benchmark_state_aware"
+    result = run_command(
+        [
+            sys.executable,
+            str(RUNNER),
+            "--binary",
+            str(fake_cli),
+            "--query-file",
+            str(query_file),
+            "--llm-model",
+            str(llm_model),
+            "--embedding-model",
+            str(embedding_model),
+            "--sqlite-db",
+            str(sqlite_db),
+            "--index-path",
+            str(index_path),
+            "--state-snapshot-in",
+            str(state_snapshot_in),
+            "--output-dir",
+            str(output_dir),
+            "--preset",
+            "dense_only_state_aware",
+            "--preset",
+            "state_aware_tiered",
+            "--preset",
+            "adaptive_state_aware",
+        ],
+        cwd=REPO_ROOT,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+
+    summary_json = json.loads((output_dir / "summary.json").read_text(encoding="utf-8"))
+    assert summary_json["run_count"] == 3
+    assert [run["preset"] for run in summary_json["runs"]] == [
+        "dense_only_state_aware",
+        "state_aware_tiered",
+        "adaptive_state_aware",
+    ]
+    assert summary_json["runs"][0]["average_total_ms"] == 39.0
+    assert summary_json["runs"][1]["average_coverage_ratio"] == 0.63
+    assert summary_json["runs"][2]["p50_total_ms"] == 21.0
+    assert summary_json["runs"][0]["state_aware_dense_query_count"] == 1
+    assert summary_json["runs"][1]["average_state_filtered_candidate_count"] == 1.5
+
+    manifest = json.loads((output_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["runs"][0]["preset_flags"] == ["--state-aware-dense"]
+    assert manifest["runs"][1]["preset_flags"] == [
+        "--lexical-prefilter",
+        "--semantic-hash-prefilter",
+        "--state-aware-dense",
+    ]
+    assert manifest["runs"][2]["preset_flags"] == [
+        "--lexical-prefilter",
+        "--semantic-hash-prefilter",
+        "--adaptive-graph",
+        "--state-aware-dense",
+    ]
+    assert "--state-aware-dense" in manifest["runs"][2]["command"]
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory(prefix="native_rag_benchmark_runner_") as temp_dir:
         temp_root = Path(temp_dir)
         test_runs_matrix_and_writes_manifest(temp_root / "case1")
         test_replays_manifest_into_new_output_dir(temp_root / "case2")
         test_runs_matrix_via_fake_adb_device(temp_root / "case3")
+        test_accepts_state_aware_presets(temp_root / "case4")
     print("Benchmark runner test passed")
     return 0
 
