@@ -24,6 +24,7 @@ This patch adds a small outer-loop benchmark runner that drives those existing e
   - `summary.json`
   - `summary.csv`
   - `manifest.json`
+- The top-level summary now carries both average end-to-end latency and batch-report `p50` / `p95` end-to-end latency for each preset.
 - `manifest.json` stores enough shared configuration to replay the matrix into a new output directory later.
 
 ## Key implementation points
@@ -104,6 +105,8 @@ The runner writes evaluation artifacts beside existing JSONL / CSV / snapshot ou
 - `summary.json` and `summary.csv` add one row/object per preset with:
   - `query_count`
   - `escalation_count`
+  - `p50_total_ms`
+  - `p95_total_ms`
   - `average_total_ms`
   - `average_coverage_ratio`
   - `max_peak_rss_kb`
@@ -139,5 +142,5 @@ The runner writes evaluation artifacts beside existing JSONL / CSV / snapshot ou
 
 - The runner currently automates the preset matrix on the host side; it does not yet wrap `adb -s fd8657d6` device execution.
 - Replay currently reuses the saved shared configuration and preset list, but it does not diff new artifacts against the original manifest.
-- The summary only surfaces metrics already present in per-run batch reports; it does not compute percentiles or deeper citation metrics itself.
+- The summary only surfaces metrics already present in per-run batch reports; it does not compute deeper citation metrics itself.
 - Presets are fixed and heuristic for now; there is no external experiment spec file yet.

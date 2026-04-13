@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <map>
 #include <string>
+#include <vector>
 
 #include "RAGPipeline.hpp"
 
@@ -34,6 +35,14 @@ class BatchQueryReport {
   double total_ms_sum_ = 0.0;
   double peak_rss_kb_sum_ = 0.0;
   uint64_t max_peak_rss_kb_ = 0;
+  std::vector<double> query_embedding_ms_samples_;
+  std::vector<double> retrieval_ms_samples_;
+  std::vector<double> evidence_ms_samples_;
+  std::vector<double> state_update_ms_samples_;
+  std::vector<double> prompt_build_ms_samples_;
+  std::vector<double> generation_ms_samples_;
+  std::vector<double> total_ms_samples_;
+  std::vector<double> peak_rss_kb_samples_;
   std::map<std::string, size_t> initial_graph_counts_;
   std::map<std::string, size_t> final_graph_counts_;
   std::map<std::string, size_t> fallback_reason_counts_;

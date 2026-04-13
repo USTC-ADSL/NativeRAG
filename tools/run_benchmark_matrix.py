@@ -225,6 +225,12 @@ def run_matrix(shared_config: dict, output_dir: Path) -> tuple[dict, dict]:
                 "escalation_count": batch_report["escalation_count"],
                 "average_total_ms": batch_report["averages"]["total_ms"],
                 "average_coverage_ratio": batch_report["averages"]["coverage_ratio"],
+                "p50_total_ms": batch_report.get("percentiles", {})
+                .get("p50", {})
+                .get("total_ms", 0.0),
+                "p95_total_ms": batch_report.get("percentiles", {})
+                .get("p95", {})
+                .get("total_ms", 0.0),
                 "max_peak_rss_kb": batch_report["maxima"]["max_peak_rss_kb"],
                 "batch_report_path": artifacts["batch_report"].relative_to(output_dir).as_posix(),
                 "trace_jsonl_path": artifacts["trace_jsonl"].relative_to(output_dir).as_posix(),
@@ -269,6 +275,8 @@ def write_summary_csv(summary: dict, output_path: Path) -> None:
                 "preset",
                 "query_count",
                 "escalation_count",
+                "p50_total_ms",
+                "p95_total_ms",
                 "average_total_ms",
                 "average_coverage_ratio",
                 "max_peak_rss_kb",
@@ -284,6 +292,8 @@ def write_summary_csv(summary: dict, output_path: Path) -> None:
                     run["preset"],
                     run["query_count"],
                     run["escalation_count"],
+                    run["p50_total_ms"],
+                    run["p95_total_ms"],
                     run["average_total_ms"],
                     run["average_coverage_ratio"],
                     run["max_peak_rss_kb"],

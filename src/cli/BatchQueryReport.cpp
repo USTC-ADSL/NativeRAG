@@ -1,10 +1,12 @@
 #include "cli/BatchQueryReport.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <fstream>
 #include <iomanip>
 #include <sstream>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -63,6 +65,29 @@ void write_count_map(std::ostringstream& out,
   out << "  }";
 }
 
+double interpolate_percentile(const std::vector<double>& samples, double percentile_rank) {
+  if (samples.empty()) {
+    return 0.0;
+  }
+  if (samples.size() == 1) {
+    return samples.front();
+  }
+
+  std::vector<double> sorted = samples;
+  std::sort(sorted.begin(), sorted.end());
+  const double position =
+      (percentile_rank / 100.0) * static_cast<double>(sorted.size() - 1);
+  const auto lower_index = static_cast<size_t>(std::floor(position));
+  const auto upper_index = static_cast<size_t>(std::ceil(position));
+  if (lower_index == upper_index) {
+    return sorted[lower_index];
+  }
+
+  const double fraction = position - static_cast<double>(lower_index);
+  return sorted[lower_index] +
+         (sorted[upper_index] - sorted[lower_index]) * fraction;
+}
+
 }  // namespace
 
 namespace mobile_rag {
@@ -93,6 +118,14 @@ void BatchQueryReport::record(const RAGPipeline::QueryTrace& trace) {
   generation_ms_sum_ += trace.timing.generation_ms;
   total_ms_sum_ += trace.timing.total_ms;
   peak_rss_kb_sum_ += static_cast<double>(trace.system.peak_rss_kb);
+  query_embedding_ms_samples_.push_back(trace.timing.query_embedding_ms);
+  retrieval_ms_samples_.push_back(trace.timing.retrieval_ms);
+  evidence_ms_samples_.push_back(trace.timing.evidence_ms);
+  state_update_ms_samples_.push_back(trace.timing.state_update_ms);
+  prompt_build_ms_samples_.push_back(trace.timing.prompt_build_ms);
+  generation_ms_samples_.push_back(trace.timing.generation_ms);
+  total_ms_samples_.push_back(trace.timing.total_ms);
+  peak_rss_kb_samples_.push_back(static_cast<double>(trace.system.peak_rss_kb));
   max_peak_rss_kb_ = std::max(max_peak_rss_kb_, trace.system.peak_rss_kb);
   ++initial_graph_counts_[trace.initial_graph];
   ++final_graph_counts_[trace.final_graph];
@@ -140,6 +173,44 @@ bool BatchQueryReport::export_json(const std::string& output_path) const {
        << "  },\n"
        << "  \"maxima\": {\n"
        << "    \"max_peak_rss_kb\": " << max_peak_rss_kb_ << "\n"
+       << "  },\n"
+       << "  \"percentiles\": {\n"
+       << "    \"p50\": {\n"
+       << "      \"query_embedding_ms\": "
+       << interpolate_percentile(query_embedding_ms_samples_, 50.0) << ",\n"
+       << "      \"retrieval_ms\": "
+       << interpolate_percentile(retrieval_ms_samples_, 50.0) << ",\n"
+       << "      \"evidence_ms\": "
+       << interpolate_percentile(evidence_ms_samples_, 50.0) << ",\n"
+       << "      \"state_update_ms\": "
+       << interpolate_percentile(state_update_ms_samples_, 50.0) << ",\n"
+       << "      \"prompt_build_ms\": "
+       << interpolate_percentile(prompt_build_ms_samples_, 50.0) << ",\n"
+       << "      \"generation_ms\": "
+       << interpolate_percentile(generation_ms_samples_, 50.0) << ",\n"
+       << "      \"total_ms\": "
+       << interpolate_percentile(total_ms_samples_, 50.0) << ",\n"
+       << "      \"peak_rss_kb\": "
+       << interpolate_percentile(peak_rss_kb_samples_, 50.0) << "\n"
+       << "    },\n"
+       << "    \"p95\": {\n"
+       << "      \"query_embedding_ms\": "
+       << interpolate_percentile(query_embedding_ms_samples_, 95.0) << ",\n"
+       << "      \"retrieval_ms\": "
+       << interpolate_percentile(retrieval_ms_samples_, 95.0) << ",\n"
+       << "      \"evidence_ms\": "
+       << interpolate_percentile(evidence_ms_samples_, 95.0) << ",\n"
+       << "      \"state_update_ms\": "
+       << interpolate_percentile(state_update_ms_samples_, 95.0) << ",\n"
+       << "      \"prompt_build_ms\": "
+       << interpolate_percentile(prompt_build_ms_samples_, 95.0) << ",\n"
+       << "      \"generation_ms\": "
+       << interpolate_percentile(generation_ms_samples_, 95.0) << ",\n"
+       << "      \"total_ms\": "
+       << interpolate_percentile(total_ms_samples_, 95.0) << ",\n"
+       << "      \"peak_rss_kb\": "
+       << interpolate_percentile(peak_rss_kb_samples_, 95.0) << "\n"
+       << "    }\n"
        << "  },\n"
        << "  \"averages\": {\n"
        << "    \"top_score\": " << (top_score_sum_ / query_count) << ",\n"

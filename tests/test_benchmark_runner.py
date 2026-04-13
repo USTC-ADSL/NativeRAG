@@ -45,9 +45,9 @@ elif "--lexical-prefilter" in sys.argv and "--semantic-hash-prefilter" in sys.ar
     preset = "static_tiered"
 
 metrics = {
-    "dense_only": {"escalation_count": 0, "total_ms": 42.0, "coverage_ratio": 0.25, "peak_rss_kb": 1000},
-    "static_tiered": {"escalation_count": 0, "total_ms": 30.0, "coverage_ratio": 0.55, "peak_rss_kb": 1200},
-    "adaptive_graph": {"escalation_count": 1, "total_ms": 24.0, "coverage_ratio": 0.80, "peak_rss_kb": 1400},
+    "dense_only": {"escalation_count": 0, "total_ms": 42.0, "coverage_ratio": 0.25, "peak_rss_kb": 1000, "p50_total_ms": 40.0, "p95_total_ms": 44.0},
+    "static_tiered": {"escalation_count": 0, "total_ms": 30.0, "coverage_ratio": 0.55, "peak_rss_kb": 1200, "p50_total_ms": 29.0, "p95_total_ms": 31.0},
+    "adaptive_graph": {"escalation_count": 1, "total_ms": 24.0, "coverage_ratio": 0.80, "peak_rss_kb": 1400, "p50_total_ms": 23.0, "p95_total_ms": 25.0},
 }[preset]
 
 queries = [line.strip() for line in Path(query_file).read_text(encoding="utf-8").splitlines() if line.strip()]
@@ -75,6 +75,10 @@ Path(batch_report).write_text(json.dumps({
     "fallback_reason_counts": {"none": len(queries)},
     "totals": {"promoted_to_hot": 0, "demoted_to_warm": 0},
     "maxima": {"max_peak_rss_kb": metrics["peak_rss_kb"]},
+    "percentiles": {
+        "p50": {"total_ms": metrics["p50_total_ms"], "peak_rss_kb": metrics["peak_rss_kb"] - 50},
+        "p95": {"total_ms": metrics["p95_total_ms"], "peak_rss_kb": metrics["peak_rss_kb"] + 25}
+    },
     "averages": {
         "top_score": 0.9,
         "score_margin": 0.5,
@@ -163,9 +167,11 @@ def test_runs_matrix_and_writes_manifest(temp_root: Path) -> None:
     ]
     assert summary_json["runs"][2]["escalation_count"] == 1
     assert summary_json["runs"][2]["average_total_ms"] == 24.0
+    assert summary_json["runs"][0]["p50_total_ms"] == 40.0
+    assert summary_json["runs"][2]["p95_total_ms"] == 25.0
 
     summary_csv_lines = (output_dir / "summary.csv").read_text(encoding="utf-8").splitlines()
-    assert summary_csv_lines[0].startswith("preset,query_count,escalation_count")
+    assert summary_csv_lines[0].startswith("preset,query_count,escalation_count,p50_total_ms,p95_total_ms")
     assert len(summary_csv_lines) == 4
 
     manifest = json.loads((output_dir / "manifest.json").read_text(encoding="utf-8"))

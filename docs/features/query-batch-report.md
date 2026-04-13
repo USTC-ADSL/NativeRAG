@@ -22,6 +22,7 @@ This patch adds a lightweight aggregate JSON report for `--query` runs, especial
   - promotion / demotion totals
   - average top score, score margin, coverage ratio, and candidate counts
   - average query-stage timing metrics
+  - P50 / P95 timing and peak-RSS percentiles from the per-query samples
   - average and maximum peak RSS proxy
   - runtime metadata snapshot for the invocation
 
@@ -33,6 +34,7 @@ This patch adds a lightweight aggregate JSON report for `--query` runs, especial
   - record each completed query trace after `answer_query(...)`
   - export the aggregate JSON after all queries finish
 - the batch report now keeps the first query's runtime metadata as the invocation snapshot and aggregates timing / RSS fields across all queries
+- the batch report now also keeps per-query timing / RSS samples so it can export deterministic `p50` and `p95` percentile summaries directly in JSON
 - `src/cli/CommandLineArgs.cpp` now parses and validates:
   - `--query-batch-report-out <path>`
 
@@ -90,6 +92,8 @@ This patch adds one aggregate JSON artifact with:
 - fallback-reason distributions
 - average evidence and shortlist metrics
 - average timing metrics
+- P50 / P95 timing percentiles
+- P50 / P95 peak RSS percentiles
 - average and maximum peak RSS proxy
 - runtime metadata snapshot
 
@@ -112,10 +116,12 @@ No new hot-path stdout log family is added.
    - `fallback_reason_counts`
    - `totals`
    - `averages`
+   - `percentiles.p50`
+   - `percentiles.p95`
 
 ## Known limitations / TODOs
 
-- The aggregate report currently captures averages and distributions only; it does not compute latency percentiles yet.
 - The output is JSON only; there is no companion CSV summary file for batch-level aggregates yet.
 - The report summarizes final query traces, not intermediate candidate lists from every retrieval stage.
 - TTFT, prefill, and decode timing remain uninstrumented at the batch-report level.
+- Percentiles currently cover timing and RSS only; retrieval-quality metrics still export averages rather than percentile views.

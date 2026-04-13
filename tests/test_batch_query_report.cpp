@@ -90,6 +90,12 @@ void test_batch_query_report_exports_aggregate_json() {
   assert(json.find("\"total_ms\": 16") != std::string::npos);
   assert(json.find("\"peak_rss_kb\": 192") != std::string::npos);
   assert(json.find("\"max_peak_rss_kb\": 256") != std::string::npos);
+  assert(json.find("\"percentiles\"") != std::string::npos);
+  assert(json.find("\"p50\"") != std::string::npos);
+  assert(json.find("\"p95\"") != std::string::npos);
+  assert(json.find("\"query_embedding_ms\": 2.9") != std::string::npos);
+  assert(json.find("\"total_ms\": 20.05") != std::string::npos);
+  assert(json.find("\"peak_rss_kb\": 249.6") != std::string::npos);
   assert(json.find("\"llm_backend\": \"LlamaCpp\"") != std::string::npos);
   assert(json.find("\"query_source\": \"query_file\"") != std::string::npos);
 
