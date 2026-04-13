@@ -11,11 +11,13 @@ This change tightens the current `llama.cpp` integration so the repo's default b
 - `LlamaCppModel` installs a quiet log sink during backend initialization so only warnings, errors, and continuation chunks from those log lines reach stderr.
 - `CommandLineArgs::parse()` now treats `--help` and `-h` as an early exit even when they appear after the primary command.
 - The new command-line and logging regression tests are now intended to run through the normal `ctest` entry point instead of manual invocation only.
+- The root CMake source globs now use `CONFIGURE_DEPENDS`, so existing build directories automatically pick up newly added `src/*.cpp` and `src/cli/*.cpp` files on the next build instead of silently missing them until a manual reconfigure.
 
 ## Key implementation points
 
 - `CMakeLists.txt` switches the project to `LANGUAGES C CXX` so the Android build can compile the vendored `sqlite3.c` translation unit.
 - `CMakeLists.txt` centralizes SQLite include/library/source selection so both `mobile_rag_cli` and `mobile_rag_dataset` use the same Android and host logic.
+- `CMakeLists.txt` now marks the recursive source globs with `CONFIGURE_DEPENDS` to keep long-lived host and Android build directories aligned when new translation units are added.
 - `src/llm/LlamaCppLogging.cpp` implements the log filter and sink wiring used by `src/llm/LlamaCppModel.cpp`.
 - `tests/CMakeLists.txt` now registers the new regression binaries with CTest and gives the llama logging test the same prebuilt runtime search path as the rest of the test suite.
 
@@ -30,6 +32,7 @@ This change tightens the current `llama.cpp` integration so the repo's default b
 - `tests/CMakeLists.txt`
 - `tests/test_command_line_args.cpp`
 - `tests/test_llama_logging.cpp`
+- `src/retrieval/SemanticHash.cpp`
 
 ## Runtime path / execution flow
 
@@ -53,6 +56,7 @@ This change tightens the current `llama.cpp` integration so the repo's default b
 - On host builds, SQLite still comes from `find_package(SQLite3 REQUIRED)`.
 - If the runtime log sink is set to `nullptr`, the logger falls back to `stderr`.
 - If `ggml-base` is unavailable, the main build still configures, but the current CMake logic only links it when found.
+- If a generator does not support `CONFIGURE_DEPENDS`, CMake will still behave like a normal globbed-source project and may require manual reconfigure.
 
 ## Schema or storage changes
 
@@ -73,6 +77,8 @@ None.
    - `ctest --test-dir build_progress_check -N`
 4. Run the focused regression tests:
    - `ctest --test-dir build_progress_check -R 'CommandLineArgsTest|LlamaLoggingTest' --output-on-failure`
+5. Verify an existing Android build directory can pick up newly added translation units:
+   - `cmake --build build_android_check --target mobile_rag_cli -j4`
 
 ## Known limitations / TODOs
 

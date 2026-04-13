@@ -80,7 +80,7 @@ function(find_library_with_fallback LIB_NAME LIB_VAR INCLUDE_VAR)
 endfunction()
 
 # Collect all sources in src/ recursively (including main.cpp)
-file(GLOB_RECURSE MOBILERAG_SOURCES
+file(GLOB_RECURSE MOBILERAG_SOURCES CONFIGURE_DEPENDS
   "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
 )
 # Exclude llm sources by default; add per-backend below
@@ -89,7 +89,7 @@ list(FILTER MOBILERAG_SOURCES EXCLUDE REGEX ".*/src/llm/.*\\.cpp$")
 list(FILTER MOBILERAG_SOURCES EXCLUDE REGEX ".*/src/main_with_dataset\\.cpp$")
 
 # Add CLI module sources
-file(GLOB CLI_SOURCES
+file(GLOB CLI_SOURCES CONFIGURE_DEPENDS
   "${CMAKE_CURRENT_SOURCE_DIR}/src/cli/*.cpp"
 )
 list(APPEND MOBILERAG_SOURCES ${CLI_SOURCES})
@@ -472,7 +472,7 @@ endif()
 # 第二个可执行文件：mobile_rag_dataset (使用 RAGPipelineWithDataset)
 # ============================================================================
 # Collect sources for the dataset version (excluding main.cpp and main_with_dataset.cpp)
-file(GLOB_RECURSE MOBILERAG_DATASET_SOURCES
+file(GLOB_RECURSE MOBILERAG_DATASET_SOURCES CONFIGURE_DEPENDS
   "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
 )
 # Exclude llm sources by default; add per-backend below
