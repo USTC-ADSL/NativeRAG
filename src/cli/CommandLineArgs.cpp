@@ -93,6 +93,8 @@ bool CommandLineArgs::parse_options() {
       config_.state_snapshot_out_path = argv_[++i];
     } else if (arg == "--query-trace-out" && i + 1 < argc_) {
       config_.query_trace_out_path = argv_[++i];
+    } else if (arg == "--query-trace-jsonl-out" && i + 1 < argc_) {
+      config_.query_trace_jsonl_out_path = argv_[++i];
     } else if (arg == "--query-summary-csv-out" && i + 1 < argc_) {
       config_.query_summary_csv_out_path = argv_[++i];
     } else if (arg == "--top-k" && i + 1 < argc_) {
@@ -279,6 +281,12 @@ bool CommandLineArgs::validate_config() {
     return false;
   }
 
+  if (!config_.query_trace_jsonl_out_path.empty() &&
+      config_.command != Command::QUERY) {
+    std::cerr << "Error: --query-trace-jsonl-out is only supported for --query\n";
+    return false;
+  }
+
   if (!config_.query_summary_csv_out_path.empty() &&
       config_.command != Command::QUERY) {
     std::cerr << "Error: --query-summary-csv-out is only supported for --query\n";
@@ -385,6 +393,8 @@ void CommandLineArgs::print_help() const {
             << "  --state-snapshot-in <path>   Restore chunk-state snapshot before execution\n"
             << "  --state-snapshot-out <path>  Export chunk-state snapshot after execution\n"
             << "  --query-trace-out <path>     Export the final query trace as JSON (query mode only)\n"
+            << "  --query-trace-jsonl-out <path>\n"
+            << "                               Append the final query trace as one JSONL row (query mode only)\n"
             << "  --query-summary-csv-out <path>\n"
             << "                               Append a flat query summary row to CSV (query mode only)\n"
             << "  --top-k <num>                Number of documents to retrieve (default: 5)\n"

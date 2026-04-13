@@ -50,6 +50,7 @@ class CommandLineArgs {
     std::string state_snapshot_in_path;
     std::string state_snapshot_out_path;
     std::string query_trace_out_path;
+    std::string query_trace_jsonl_out_path;
     std::string query_summary_csv_out_path;
 
     // Performance

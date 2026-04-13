@@ -4,13 +4,15 @@
 
 Phase 5 and Phase 7 in `AGENTS.md` both need more than console-only logs. The repo already emits useful `[CONTROLLER]`, `[RETRIEVAL]`, `[EVIDENCE]`, and `[INDEX_STATE]` lines, but replaying experiments from stdout alone is brittle.
 
-This patch adds an explicit per-query export path so experiments can persist the final retrieval/controller trace as a structured artifact, plus a flat CSV summary row that can be appended across many queries.
+This patch adds explicit per-query export paths so experiments can persist the final retrieval/controller trace as a structured artifact, plus append-friendly formats for batch accumulation.
 
 ## What behavior changed
 
 - `--query` now accepts an optional `--query-trace-out <path>` flag.
+- `--query` now accepts an optional `--query-trace-jsonl-out <path>` flag.
 - `--query` now accepts an optional `--query-summary-csv-out <path>` flag.
 - After a successful query run, the CLI can export the final query trace as JSON.
+- After a successful query run, the CLI can append the final query trace as one JSONL row.
 - After a successful query run, the CLI can also append a flat CSV summary row for batch analysis.
 - `RAGPipeline` now keeps the most recent query trace in memory and exposes it through:
   - `last_query_trace()`
@@ -45,9 +47,11 @@ This patch adds an explicit per-query export path so experiments can persist the
   - writes a deterministic JSON object when export is requested
 - `CommandLineArgs` now parses and validates:
   - `--query-trace-out <path>`
+  - `--query-trace-jsonl-out <path>`
   - `--query-summary-csv-out <path>`
 - `src/main.cpp` and `src/main_with_dataset.cpp` now export the trace after `--query` completes.
   - JSON export keeps the full structured artifact
+  - JSONL export appends one compact structured row per query
   - CSV export appends a single flat row and writes the header automatically when the file is new
 
 ## Main files / modules touched
@@ -69,13 +73,17 @@ This patch adds an explicit per-query export path so experiments can persist the
 4. If `--query-trace-out` is set:
    - the CLI calls `export_last_query_trace(...)`
    - the trace is serialized to a JSON file after the query finishes
-5. If `--query-summary-csv-out` is set:
+5. If `--query-trace-jsonl-out` is set:
+   - the CLI calls `append_last_query_trace_jsonl(...)`
+   - the final query trace is serialized as one compact JSON object followed by `\n`
+6. If `--query-summary-csv-out` is set:
    - the CLI calls `append_last_query_trace_summary_csv(...)`
    - the final query trace is flattened into one CSV row
    - the header is emitted automatically on first write
-6. Snapshot export and trace export remain separate:
+7. Snapshot export and trace export remain separate:
    - snapshot export persists SQLite chunk-state tables
    - query trace export persists the final query-level decision artifact
+   - query trace JSONL persists one structured row per query
    - query summary CSV persists a batch-friendly row-oriented view
 
 ## Config flags / thresholds / defaults
@@ -84,6 +92,10 @@ This patch adds an explicit per-query export path so experiments can persist the
   - default: disabled
   - supported only for `--query`
   - writes a JSON file for the most recent query
+- `--query-trace-jsonl-out <path>`
+  - default: disabled
+  - supported only for `--query`
+  - appends a compact JSON line for the most recent query
 - `--query-summary-csv-out <path>`
   - default: disabled
   - supported only for `--query`
@@ -117,6 +129,12 @@ This patch adds a structured JSON artifact that mirrors and aggregates existing 
 - index-state summary
 - ranked result IDs and scores
 
+This patch also adds an append-friendly JSONL artifact:
+
+- one JSON object per query
+- same structured fields as the single-query JSON export
+- suitable for incremental batch accumulation without flattening nested fields
+
 This patch also adds a flat CSV artifact intended for aggregation across many queries:
 
 - one row per query
@@ -134,9 +152,11 @@ This patch also adds a flat CSV artifact intended for aggregation across many qu
    - `ctest --test-dir build_progress_check -R 'CommandLineArgsTest|RAGSemanticHashPrefilterTest' --output-on-failure`
 4. Run a query with trace export:
    - `mobile_rag --query "..." --llm-model <gguf> --embedding-model <emb-config> --query-trace-out /tmp/query-trace.json ...`
-5. Run a query with CSV summary export:
+5. Run a query with JSONL export:
+   - `mobile_rag --query "..." --llm-model <gguf> --embedding-model <emb-config> --query-trace-jsonl-out /tmp/query-trace.jsonl ...`
+6. Run a query with CSV summary export:
    - `mobile_rag --query "..." --llm-model <gguf> --embedding-model <emb-config> --query-summary-csv-out /tmp/query-summary.csv ...`
-6. Confirm the JSON contains:
+7. Confirm the JSON contains:
    - `initial_graph`
    - `final_graph`
    - `budget_class`
@@ -144,7 +164,10 @@ This patch also adds a flat CSV artifact intended for aggregation across many qu
    - `index_state`
    - `evidence`
    - `results`
-7. Confirm the CSV contains:
+8. Confirm the JSONL contains:
+   - one JSON object per line
+   - the same structured fields as the JSON export
+9. Confirm the CSV contains:
    - a single header row when the file is first created
    - one appended row per query
    - flattened fields such as `budget_class`, `fallback_reason`, `coverage_ratio`, `top_result_id`
@@ -153,5 +176,6 @@ This patch also adds a flat CSV artifact intended for aggregation across many qu
 
 - `--query-trace-out` currently supports only single `--query` runs, not interactive multi-turn sessions.
 - The JSON is written manually and intentionally stays small; it is not yet a full replay bundle.
+- JSONL append still requires the caller to invoke the CLI once per query; there is no built-in multi-query driver yet.
 - The trace captures final query results, not intermediate candidate lists before rerank.
 - The CSV is intentionally flat and only includes the top-level summary plus top-1 result fields; it is not a full replay bundle.

@@ -108,6 +108,10 @@ int main(int argc, char** argv) {
               << "  Query Trace Out: "
               << (config.query_trace_out_path.empty() ? "(none)"
                                                       : config.query_trace_out_path) << '\n'
+              << "  Query Trace JSONL Out: "
+              << (config.query_trace_jsonl_out_path.empty() ? "(none)"
+                                                            : config.query_trace_jsonl_out_path)
+              << '\n'
               << "  Query Summary CSV Out: "
               << (config.query_summary_csv_out_path.empty() ? "(none)"
                                                             : config.query_summary_csv_out_path)
@@ -297,6 +301,16 @@ int main(int argc, char** argv) {
       }
       std::cout << "✓ Query trace exported to: "
                 << config.query_trace_out_path << '\n';
+    }
+
+    if (!config.query_trace_jsonl_out_path.empty()) {
+      if (!pipeline.append_last_query_trace_jsonl(config.query_trace_jsonl_out_path)) {
+        std::cerr << "[ERROR] Failed to append query trace JSONL: "
+                  << config.query_trace_jsonl_out_path << '\n';
+        return 1;
+      }
+      std::cout << "✓ Query trace JSONL appended to: "
+                << config.query_trace_jsonl_out_path << '\n';
     }
 
     if (!config.query_summary_csv_out_path.empty()) {

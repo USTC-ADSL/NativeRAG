@@ -226,9 +226,11 @@ void test_lexical_and_hash_shortlists_are_merged_before_dense_rerank() {
 void test_adaptive_graph_logs_controller_selection() {
   const std::string db_path = make_temp_db_path("adaptive-controller");
   const std::string trace_path = "/tmp/native_rag_query_trace.json";
+  const std::string trace_jsonl_path = "/tmp/native_rag_query_trace.jsonl";
   const std::string summary_csv_path = "/tmp/native_rag_query_trace_summary.csv";
   std::filesystem::remove(db_path);
   std::filesystem::remove(trace_path);
+  std::filesystem::remove(trace_jsonl_path);
   std::filesystem::remove(summary_csv_path);
 
   auto sqlite_db = std::make_shared<SqliteVectorDB>(db_path);
@@ -297,16 +299,31 @@ void test_adaptive_graph_logs_controller_selection() {
   std::ifstream trace_stream(trace_path);
   std::string trace_json((std::istreambuf_iterator<char>(trace_stream)),
                          std::istreambuf_iterator<char>());
-  assert(trace_json.find("\"query\":\"sqlite metadata retrieval traces\"") != std::string::npos);
-  assert(trace_json.find("\"initial_graph\":\"lexical_prefilter\"") != std::string::npos);
-  assert(trace_json.find("\"final_graph\":\"lexical_prefilter\"") != std::string::npos);
-  assert(trace_json.find("\"budget_class\":\"tight\"") != std::string::npos);
-  assert(trace_json.find("\"top_k\":1") != std::string::npos);
-  assert(trace_json.find("\"lexical_prefilter_enabled\":true") != std::string::npos);
-  assert(trace_json.find("\"semantic_hash_candidate_limit\":1") != std::string::npos);
-  assert(trace_json.find("\"promoted_to_hot\":1") != std::string::npos);
-  assert(trace_json.find("\"hot\":1") != std::string::npos);
-  assert(trace_json.find("\"transition_count\":3") != std::string::npos);
+  assert(trace_json.find("\"query\": \"sqlite metadata retrieval traces\"") !=
+         std::string::npos);
+  assert(trace_json.find("\"initial_graph\": \"lexical_prefilter\"") !=
+         std::string::npos);
+  assert(trace_json.find("\"final_graph\": \"lexical_prefilter\"") !=
+         std::string::npos);
+  assert(trace_json.find("\"budget_class\": \"tight\"") != std::string::npos);
+  assert(trace_json.find("\"top_k\": 1") != std::string::npos);
+  assert(trace_json.find("\"lexical_prefilter_enabled\": true") != std::string::npos);
+  assert(trace_json.find("\"semantic_hash_candidate_limit\": 1") != std::string::npos);
+  assert(trace_json.find("\"promoted_to_hot\": 1") != std::string::npos);
+  assert(trace_json.find("\"hot\": 1") != std::string::npos);
+  assert(trace_json.find("\"transition_count\": 3") != std::string::npos);
+  assert(pipeline.append_last_query_trace_jsonl(trace_jsonl_path));
+
+  std::ifstream trace_jsonl_stream(trace_jsonl_path);
+  std::string trace_jsonl((std::istreambuf_iterator<char>(trace_jsonl_stream)),
+                          std::istreambuf_iterator<char>());
+  assert(trace_jsonl.find("{\"query\":\"sqlite metadata retrieval traces\"") !=
+         std::string::npos);
+  assert(trace_jsonl.find("\"budget_class\":\"tight\"") != std::string::npos);
+  assert(trace_jsonl.find("\"semantic_hash_candidate_limit\":1") != std::string::npos);
+  assert(trace_jsonl.find("\"promoted_to_hot\":1") != std::string::npos);
+  assert(trace_jsonl.find("\"transition_count\":3") != std::string::npos);
+  assert(trace_jsonl.find('\n') != std::string::npos);
   assert(pipeline.append_last_query_trace_summary_csv(summary_csv_path));
 
   std::ifstream summary_stream(summary_csv_path);
@@ -321,6 +338,7 @@ void test_adaptive_graph_logs_controller_selection() {
 
   std::filesystem::remove(db_path);
   std::filesystem::remove(trace_path);
+  std::filesystem::remove(trace_jsonl_path);
   std::filesystem::remove(summary_csv_path);
 }
 

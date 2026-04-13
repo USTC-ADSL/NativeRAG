@@ -96,6 +96,8 @@ void test_query_parses_semantic_hash_prefilter_flags() {
       "/tmp/out.snapshot.tsv",
       "--query-trace-out",
       "/tmp/out.trace.json",
+      "--query-trace-jsonl-out",
+      "/tmp/out.trace.jsonl",
       "--query-summary-csv-out",
       "/tmp/out.summary.csv",
   };
@@ -120,6 +122,7 @@ void test_query_parses_semantic_hash_prefilter_flags() {
   assert(config.state_snapshot_in_path == snapshot_in_path.string());
   assert(config.state_snapshot_out_path == "/tmp/out.snapshot.tsv");
   assert(config.query_trace_out_path == "/tmp/out.trace.json");
+  assert(config.query_trace_jsonl_out_path == "/tmp/out.trace.jsonl");
   assert(config.query_summary_csv_out_path == "/tmp/out.summary.csv");
 
   std::filesystem::remove(llm_path);

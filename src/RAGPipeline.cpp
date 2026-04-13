@@ -167,6 +167,90 @@ std::string csv_escape(const std::string& input) {
   return escaped;
 }
 
+std::string serialize_query_trace_json(const RAGPipeline::QueryTrace& trace, bool pretty) {
+  const std::string newline = pretty ? "\n" : "";
+  const std::string colon = pretty ? ": " : ":";
+  auto indent = [&](int level) {
+    return pretty ? std::string(static_cast<size_t>(level) * 2, ' ') : std::string();
+  };
+
+  std::ostringstream out;
+  out << "{" << newline
+      << indent(1) << "\"query\"" << colon << "\"" << json_escape(trace.query) << "\"," << newline
+      << indent(1) << "\"answer\"" << colon << "\"" << json_escape(trace.answer) << "\"," << newline
+      << indent(1) << "\"adaptive_graph_enabled\"" << colon
+      << (trace.adaptive_graph_enabled ? "true" : "false") << "," << newline
+      << indent(1) << "\"budget_class\"" << colon << "\"" << json_escape(trace.budget_class) << "\"," << newline
+      << indent(1) << "\"initial_graph\"" << colon << "\"" << json_escape(trace.initial_graph) << "\"," << newline
+      << indent(1) << "\"final_graph\"" << colon << "\"" << json_escape(trace.final_graph) << "\"," << newline
+      << indent(1) << "\"initial_reason\"" << colon << "\"" << json_escape(trace.initial_reason) << "\"," << newline
+      << indent(1) << "\"final_reason\"" << colon << "\"" << json_escape(trace.final_reason) << "\"," << newline
+      << indent(1) << "\"top_k\"" << colon << trace.top_k << "," << newline
+      << indent(1) << "\"lexical_prefilter_enabled\"" << colon
+      << (trace.lexical_prefilter_enabled ? "true" : "false") << "," << newline
+      << indent(1) << "\"lexical_candidate_limit\"" << colon << trace.lexical_candidate_limit << "," << newline
+      << indent(1) << "\"semantic_hash_prefilter_enabled\"" << colon
+      << (trace.semantic_hash_prefilter_enabled ? "true" : "false") << "," << newline
+      << indent(1) << "\"semantic_hash_candidate_limit\"" << colon
+      << trace.semantic_hash_candidate_limit << "," << newline
+      << indent(1) << "\"semantic_hash_max_distance\"" << colon
+      << trace.semantic_hash_max_distance << "," << newline
+      << indent(1) << "\"escalated\"" << colon
+      << (trace.escalated ? "true" : "false") << "," << newline
+      << indent(1) << "\"escalation_from\"" << colon << "\"" << json_escape(trace.escalation_from) << "\"," << newline
+      << indent(1) << "\"escalation_to\"" << colon << "\"" << json_escape(trace.escalation_to) << "\"," << newline
+      << indent(1) << "\"escalation_reason\"" << colon << "\"" << json_escape(trace.escalation_reason) << "\"," << newline
+      << indent(1) << "\"lexical_candidate_count\"" << colon << trace.lexical_candidate_count << "," << newline
+      << indent(1) << "\"hash_candidate_count\"" << colon << trace.hash_candidate_count << "," << newline
+      << indent(1) << "\"dense_result_count\"" << colon << trace.dense_result_count << "," << newline
+      << indent(1) << "\"fallback_reason\"" << colon << "\"" << json_escape(trace.fallback_reason) << "\"," << newline
+      << indent(1) << "\"promoted_to_hot\"" << colon << trace.promoted_to_hot << "," << newline
+      << indent(1) << "\"demoted_to_warm\"" << colon << trace.demoted_to_warm << "," << newline
+      << indent(1) << "\"index_state\"" << colon << "{" << newline
+      << indent(2) << "\"hot\"" << colon << trace.index_state.hot_count << "," << newline
+      << indent(2) << "\"warm\"" << colon << trace.index_state.warm_count << "," << newline
+      << indent(2) << "\"cold\"" << colon << trace.index_state.cold_count << "," << newline
+      << indent(2) << "\"transition_count\"" << colon << trace.index_state.transition_count << newline
+      << indent(1) << "}," << newline
+      << indent(1) << "\"evidence\"" << colon << "{" << newline
+      << indent(2) << "\"top_score\"" << colon << trace.evidence.top_score << "," << newline
+      << indent(2) << "\"second_score\"" << colon << trace.evidence.second_score << "," << newline
+      << indent(2) << "\"score_margin\"" << colon << trace.evidence.score_margin << "," << newline
+      << indent(2) << "\"score_sharpness\"" << colon << trace.evidence.score_sharpness << "," << newline
+      << indent(2) << "\"retrieved_chunk_count\"" << colon << trace.evidence.retrieved_chunk_count << "," << newline
+      << indent(2) << "\"query_term_count\"" << colon << trace.evidence.query_term_count << "," << newline
+      << indent(2) << "\"covered_query_terms\"" << colon << trace.evidence.covered_query_terms << "," << newline
+      << indent(2) << "\"coverage_ratio\"" << colon << trace.evidence.coverage_ratio << newline
+      << indent(1) << "}," << newline
+      << indent(1) << "\"results\"" << colon << "[";
+
+  if (pretty && !trace.results.empty()) {
+    out << newline;
+  }
+
+  for (size_t i = 0; i < trace.results.size(); ++i) {
+    const auto& result = trace.results[i];
+    out << indent(pretty ? 2 : 0)
+        << "{\"id\"" << colon << result.id
+        << ",\"score\"" << colon << result.score
+        << ",\"preview\"" << colon << "\"" << json_escape(result.preview) << "\"}";
+    if (i + 1 < trace.results.size()) {
+      out << ",";
+    }
+    if (pretty) {
+      out << newline;
+    }
+  }
+
+  if (pretty && !trace.results.empty()) {
+    out << indent(1);
+  }
+
+  out << "]" << newline
+      << indent(0) << "}";
+  return out.str();
+}
+
 struct RetrievalExecution {
   std::vector<std::pair<int64_t, float>> results;
   size_t lexical_candidate_count = 0;
@@ -234,72 +318,21 @@ bool RAGPipeline::export_last_query_trace(const std::string& output_path) const 
     return false;
   }
 
-  out << "{\n"
-      << "  \"query\":\"" << json_escape(last_query_trace_.query) << "\",\n"
-      << "  \"answer\":\"" << json_escape(last_query_trace_.answer) << "\",\n"
-      << "  \"adaptive_graph_enabled\":"
-      << (last_query_trace_.adaptive_graph_enabled ? "true" : "false") << ",\n"
-      << "  \"budget_class\":\"" << json_escape(last_query_trace_.budget_class) << "\",\n"
-      << "  \"initial_graph\":\"" << json_escape(last_query_trace_.initial_graph) << "\",\n"
-      << "  \"final_graph\":\"" << json_escape(last_query_trace_.final_graph) << "\",\n"
-      << "  \"initial_reason\":\"" << json_escape(last_query_trace_.initial_reason) << "\",\n"
-      << "  \"final_reason\":\"" << json_escape(last_query_trace_.final_reason) << "\",\n"
-      << "  \"top_k\":" << last_query_trace_.top_k << ",\n"
-      << "  \"lexical_prefilter_enabled\":"
-      << (last_query_trace_.lexical_prefilter_enabled ? "true" : "false") << ",\n"
-      << "  \"lexical_candidate_limit\":" << last_query_trace_.lexical_candidate_limit << ",\n"
-      << "  \"semantic_hash_prefilter_enabled\":"
-      << (last_query_trace_.semantic_hash_prefilter_enabled ? "true" : "false") << ",\n"
-      << "  \"semantic_hash_candidate_limit\":"
-      << last_query_trace_.semantic_hash_candidate_limit << ",\n"
-      << "  \"semantic_hash_max_distance\":"
-      << last_query_trace_.semantic_hash_max_distance << ",\n"
-      << "  \"escalated\":"
-      << (last_query_trace_.escalated ? "true" : "false") << ",\n"
-      << "  \"escalation_from\":\"" << json_escape(last_query_trace_.escalation_from) << "\",\n"
-      << "  \"escalation_to\":\"" << json_escape(last_query_trace_.escalation_to) << "\",\n"
-      << "  \"escalation_reason\":\"" << json_escape(last_query_trace_.escalation_reason)
-      << "\",\n"
-      << "  \"lexical_candidate_count\":" << last_query_trace_.lexical_candidate_count << ",\n"
-      << "  \"hash_candidate_count\":" << last_query_trace_.hash_candidate_count << ",\n"
-      << "  \"dense_result_count\":" << last_query_trace_.dense_result_count << ",\n"
-      << "  \"fallback_reason\":\"" << json_escape(last_query_trace_.fallback_reason)
-      << "\",\n"
-      << "  \"promoted_to_hot\":" << last_query_trace_.promoted_to_hot << ",\n"
-      << "  \"demoted_to_warm\":" << last_query_trace_.demoted_to_warm << ",\n"
-      << "  \"index_state\":{\n"
-      << "    \"hot\":" << last_query_trace_.index_state.hot_count << ",\n"
-      << "    \"warm\":" << last_query_trace_.index_state.warm_count << ",\n"
-      << "    \"cold\":" << last_query_trace_.index_state.cold_count << ",\n"
-      << "    \"transition_count\":" << last_query_trace_.index_state.transition_count << "\n"
-      << "  },\n"
-      << "  \"evidence\":{\n"
-      << "    \"top_score\":" << last_query_trace_.evidence.top_score << ",\n"
-      << "    \"second_score\":" << last_query_trace_.evidence.second_score << ",\n"
-      << "    \"score_margin\":" << last_query_trace_.evidence.score_margin << ",\n"
-      << "    \"score_sharpness\":" << last_query_trace_.evidence.score_sharpness << ",\n"
-      << "    \"retrieved_chunk_count\":"
-      << last_query_trace_.evidence.retrieved_chunk_count << ",\n"
-      << "    \"query_term_count\":" << last_query_trace_.evidence.query_term_count << ",\n"
-      << "    \"covered_query_terms\":"
-      << last_query_trace_.evidence.covered_query_terms << ",\n"
-      << "    \"coverage_ratio\":" << last_query_trace_.evidence.coverage_ratio << "\n"
-      << "  },\n"
-      << "  \"results\":[\n";
+  out << serialize_query_trace_json(last_query_trace_, true) << '\n';
+  return static_cast<bool>(out);
+}
 
-  for (size_t i = 0; i < last_query_trace_.results.size(); ++i) {
-    const auto& result = last_query_trace_.results[i];
-    out << "    {\"id\":" << result.id
-        << ",\"score\":" << result.score
-        << ",\"preview\":\"" << json_escape(result.preview) << "\"}";
-    if (i + 1 < last_query_trace_.results.size()) {
-      out << ",";
-    }
-    out << "\n";
+bool RAGPipeline::append_last_query_trace_jsonl(const std::string& output_path) const {
+  if (!has_last_query_trace_ || output_path.empty()) {
+    return false;
   }
 
-  out << "  ]\n"
-      << "}\n";
+  std::ofstream out(output_path, std::ios::app);
+  if (!out) {
+    return false;
+  }
+
+  out << serialize_query_trace_json(last_query_trace_, false) << '\n';
   return static_cast<bool>(out);
 }
 
