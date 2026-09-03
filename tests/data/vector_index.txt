@@ -1,0 +1,1 @@
+NativeRAG 使用 Faiss 保存和搜索向量索引。Faiss 负责根据查询向量找出最相关的文本块。

@@ -1,0 +1,1 @@
+NativeRAG 使用 SQLite 保存文本元数据。SQLite 中记录向量 ID 与原始文本块之间的映射。

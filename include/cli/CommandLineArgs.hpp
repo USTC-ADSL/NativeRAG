@@ -1,9 +1,6 @@
 #pragma once
 
 #include <string>
-#include <vector>
-#include <iostream>
-#include <filesystem>
 
 namespace mobile_rag {
 
@@ -15,46 +12,34 @@ class CommandLineArgs {
  public:
   enum class Command {
     HELP,
+    BACKEND_INFO,
     BUILD,
     QUERY,
     INTERACTIVE,
     UNKNOWN
   };
 
-  // Configuration structure
   struct Config {
-    enum class DataSource {
-      TEXT,
-      DATASET,
-    };
-
-    // Command
     Command command = Command::HELP;
 
-    // Models
     std::string llm_model_path;
     std::string embedding_model_path;
+    std::string reranker_model_path;
 
-    // Vector DB / index settings
     std::string sqlite_db_path = "./vector_store.sqlite3";
     std::string faiss_index_type = "Flat";
-    std::string index_path = "./faiss_index.bin";  // Path to save/load Faiss index
+    std::string index_path = "./faiss_index.bin";
 
-    // Input/Output
-    DataSource data_source = DataSource::TEXT;
     std::string text_path;
-    std::string dataset_path;
-    std::string input_file;
     std::string query;
-    std::string output_file;
 
-    // Performance
     int num_threads = 4;
-    int top_k = 5;  // Number of documents to retrieve
+    int top_k = 5;
+    int rerank_candidates = 20;
+    int max_tokens = 256;
 
-    // Flags
     bool verbose = false;
-    bool use_gpu = false;
+    bool retrieve_only = false;
     bool save_index = true;
     bool load_index = true;
   };

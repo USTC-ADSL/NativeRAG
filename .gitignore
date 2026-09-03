@@ -1,9 +1,6 @@
-third_party/MobileRAG
-third_party/purecpp
 models/
 build/
 build_*/
 build-*/
-prebuilt-old/
 .vscode/
 .cache/

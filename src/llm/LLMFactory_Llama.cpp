@@ -6,11 +6,11 @@
 
 namespace mobile_rag {
 
-std::shared_ptr<ILargeLanguageModel> create_llm() {
-  return std::make_shared<LlamaCppModel>();
+std::shared_ptr<ILargeLanguageModel> create_llm(int num_threads,
+                                                int max_tokens) {
+  return std::make_shared<LlamaCppModel>(num_threads, max_tokens);
 }
 
 }  // namespace mobile_rag
-
 
 

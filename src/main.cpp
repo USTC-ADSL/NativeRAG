@@ -2,44 +2,18 @@
 #include <memory>
 #include <string>
 #include <vector>
-#include <cstdio>
-#include <unistd.h>
-#include <fcntl.h>
 
 #include "RAGPipeline.hpp"
 #include "cli/CommandLineArgs.hpp"
 
 #include "loader/TextFileLoader.hpp"
-#include "embedding/MNNEmbedding.hpp"
+#include "embedding/EmbeddingFactory.hpp"
 #include "vector_Index/FaissIndex.hpp"
 #include "vector_db/SqliteVectorDB.hpp"
 #include "llm/LLMFactory.hpp"
+#include "reranker/RerankerFactory.hpp"
 
-// Helper function to suppress MNN startup messages
-void suppress_mnn_startup_output() {
-  // Redirect stdout to /dev/null temporarily during MNN initialization
-  // This suppresses CPU detection messages like "CPU Group: [...]"
-  fflush(stdout);
-  int saved_stdout = dup(STDOUT_FILENO);
-  int devnull = open("/dev/null", O_WRONLY);
-  dup2(devnull, STDOUT_FILENO);
-  close(devnull);
-
-  // Store the saved stdout for later restoration
-  // We'll restore it after the first model load
-  static int g_saved_stdout = saved_stdout;
-}
-
-void restore_stdout() {
-  // This will be called after MNN initialization
-  static int g_saved_stdout = -1;
-  if (g_saved_stdout != -1) {
-    fflush(stdout);
-    dup2(g_saved_stdout, STDOUT_FILENO);
-    close(g_saved_stdout);
-    g_saved_stdout = -1;
-  }
-}
+#include "llama/LlamaRuntime.hpp"
 
 int main(int argc, char** argv) {
   using namespace mobile_rag;
@@ -52,18 +26,26 @@ int main(int argc, char** argv) {
 
   const auto& config = args.get_config();
 
+  if (config.command == CommandLineArgs::Command::BACKEND_INFO) {
+    if (!LlamaRuntime::acquire()) {
+      return 1;
+    }
+    LlamaRuntime::release();
+    return 0;
+  }
+
   if (config.verbose) {
     std::cout << "[INFO] Configuration:\n"
               << "  LLM Model: " << config.llm_model_path << '\n'
               << "  Embedding Model: " << config.embedding_model_path << '\n'
+              << "  Reranker Model: " << config.reranker_model_path << '\n'
               << "  SQLite DB: " << config.sqlite_db_path << '\n'
               << "  Faiss Type: " << config.faiss_index_type << '\n'
-              << "  Data Source: "
-              << (config.data_source == CommandLineArgs::Config::DataSource::DATASET ? "dataset"
-                                                                                     : "txt")
-              << '\n'
+              << "  Text Path: " << config.text_path << '\n'
               << "  Top-K: " << config.top_k << '\n'
-              << "  Threads: " << config.num_threads << '\n';
+              << "  Rerank Candidates: " << config.rerank_candidates << '\n'
+              << "  Threads: " << config.num_threads << '\n'
+              << "  Max Tokens: " << config.max_tokens << '\n';
   }
 
   // Initialize SQLite DB for persisting id->text mappings
@@ -76,7 +58,7 @@ int main(int argc, char** argv) {
     // No need for: LLM
 
     auto loader = std::make_shared<TextFileLoader>();
-    auto embedder = std::make_shared<MNNEmbedding>();
+    auto embedder = create_embedding(config.num_threads);
     auto index = std::make_shared<FaissIndex>(config.faiss_index_type,
                                               faiss::METRIC_INNER_PRODUCT);
 
@@ -92,24 +74,21 @@ int main(int argc, char** argv) {
     }
 
     // Create pipeline without LLM for offline phase
-    RAGPipeline pipeline(loader, embedder, index, nullptr, sqlite_db);
-    if (config.data_source == CommandLineArgs::Config::DataSource::DATASET) {
-      std::cerr << "[ERROR] Dataset mode is not supported in this binary. "
-                   "Use main_with_dataset instead."
-                << '\n';
-      return 1;
-    }
-
+    RAGPipeline pipeline(loader, embedder, index, nullptr, sqlite_db,
+                         config.top_k);
     // ========== 离线阶段 (Offline/Indexing Phase) ==========
     if (config.verbose) {
       std::cout << "[INFO] === OFFLINE PHASE: Building Index ===\n"
-                << "[INFO] Input file: " << config.input_file << '\n'
+                << "[INFO] Input path: " << config.text_path << '\n'
                 << "[INFO] Index path: " << config.index_path << '\n';
     }
 
     // Step 1-3: Load documents, embed, and build index
-    pipeline.build_index_from_file(config.input_file);
-    std::cout << "✓ Index built from: " << config.input_file << '\n';
+    if (!pipeline.build_index_from_file(config.text_path)) {
+      std::cerr << "[ERROR] Failed to build index from input\n";
+      return 1;
+    }
+    std::cout << "✓ Index built from: " << config.text_path << '\n';
 
     // Save index to disk
     if (config.save_index) {
@@ -128,10 +107,10 @@ int main(int argc, char** argv) {
     // Only need: embedder, index, llm
     // No need for: loader
 
-    auto embedder = std::make_shared<MNNEmbedding>();
+    auto embedder = create_embedding(config.num_threads);
     auto index = std::make_shared<FaissIndex>(config.faiss_index_type,
                                               faiss::METRIC_INNER_PRODUCT);
-    auto llm = create_llm();
+    std::shared_ptr<IReranker> reranker;
 
     // Load embedding model
     if (!embedder->load_model(config.embedding_model_path)) {
@@ -144,18 +123,17 @@ int main(int argc, char** argv) {
       std::cout << "[INFO] Embedding model loaded successfully\n";
     }
 
-    // Load LLM model
-    if (!llm->load_model(config.llm_model_path)) {
-      std::cerr << "[ERROR] Failed to load LLM model from: " << config.llm_model_path << '\n';
-      return 1;
+    if (!config.reranker_model_path.empty()) {
+      reranker = create_reranker(config.num_threads);
+      if (!reranker->load_model(config.reranker_model_path)) {
+        std::cerr << "[ERROR] Failed to load reranker model from: "
+                  << config.reranker_model_path << '\n';
+        return 1;
+      }
+      if (config.verbose) {
+        std::cout << "[INFO] Reranker model loaded successfully\n";
+      }
     }
-
-    if (config.verbose) {
-      std::cout << "[INFO] LLM model loaded successfully\n";
-    }
-
-    // Create pipeline without loader for query phase
-    RAGPipeline pipeline(nullptr, embedder, index, llm, sqlite_db);
 
     if (config.verbose) {
       std::cout << "[INFO] === ONLINE PHASE: Query Processing ===\n"
@@ -163,34 +141,71 @@ int main(int argc, char** argv) {
                 << "[INFO] Index path: " << config.index_path << '\n';
     }
 
-    // Load index from disk
-    if (config.load_index) {
+    std::vector<std::string> contexts;
+    {
+      RAGPipeline retrieval_pipeline(nullptr, embedder, index, nullptr,
+                                     sqlite_db, config.top_k, reranker,
+                                     config.rerank_candidates);
+
+      if (config.load_index) {
+        if (config.verbose) {
+          std::cout << "[INFO] Loading index from: " << config.index_path
+                    << '\n';
+        }
+        if (!retrieval_pipeline.load_index(config.index_path)) {
+          std::cerr << "[ERROR] Failed to load index\n";
+          return 1;
+        }
+        std::cout << "✓ Index loaded from: " << config.index_path << '\n';
+      }
+
       if (config.verbose) {
-        std::cout << "[INFO] Loading index from: " << config.index_path << '\n';
+        std::cout << "[INFO] Processing query: " << config.query << '\n';
       }
-      if (!pipeline.load_index(config.index_path)) {
-        std::cerr << "[ERROR] Failed to load index\n";
-        return 1;
-      }
-      std::cout << "✓ Index loaded from: " << config.index_path << '\n';
+      contexts = retrieval_pipeline.retrieve_contexts(config.query);
     }
 
-    // Step 4-7: Query embedding, search, context retrieval, and LLM inference
-    if (config.verbose) {
-      std::cout << "[INFO] Processing query: " << config.query << '\n';
+    if (contexts.empty()) {
+      std::cerr << "[ERROR] Query did not retrieve any context\n";
+      return 1;
     }
-    std::string answer = pipeline.answer_query(config.query);
-    std::cout << answer << '\n';
+    if (config.retrieve_only) {
+      std::cout << "[RETRIEVE-ONLY] Retrieved " << contexts.size()
+                << " context(s)\n";
+      return 0;
+    }
+
+    reranker.reset();
+    embedder.reset();
+
+    auto llm = create_llm(config.num_threads, config.max_tokens);
+    if (!llm || !llm->load_model(config.llm_model_path)) {
+      std::cerr << "[ERROR] Failed to load LLM model from: "
+                << config.llm_model_path << '\n';
+      return 1;
+    }
+    if (config.verbose) {
+      std::cout << "[INFO] LLM model loaded successfully\n";
+    }
+
+    const std::string prompt = llm->build_prompt(config.query, contexts);
+    std::string answer = llm->generate(prompt);
+    if (answer.empty()) {
+      std::cerr << "[ERROR] Query did not produce an answer\n";
+      return 1;
+    }
+    std::cout << "[ANSWER] " << answer << '\n';
     return 0;
   } else if (config.command == CommandLineArgs::Command::INTERACTIVE) {
     // ========== 查询阶段 (Online/Query Phase) ==========
     // Only need: embedder, index, llm
     // No need for: loader
 
-    auto embedder = std::make_shared<MNNEmbedding>();
+    auto embedder = create_embedding(config.num_threads);
     auto index = std::make_shared<FaissIndex>(config.faiss_index_type,
                                               faiss::METRIC_INNER_PRODUCT);
-    auto llm = create_llm();
+    auto llm = create_llm(config.num_threads, config.max_tokens);
+    std::shared_ptr<IReranker> reranker;
 
     // Load embedding model
     if (!embedder->load_model(config.embedding_model_path)) {
@@ -201,6 +216,18 @@ int main(int argc, char** argv) {
 
     if (config.verbose) {
       std::cout << "[INFO] Embedding model loaded successfully\n";
+    }
+
+    if (!config.reranker_model_path.empty()) {
+      reranker = create_reranker(config.num_threads);
+      if (!reranker->load_model(config.reranker_model_path)) {
+        std::cerr << "[ERROR] Failed to load reranker model from: "
+                  << config.reranker_model_path << '\n';
+        return 1;
+      }
+      if (config.verbose) {
+        std::cout << "[INFO] Reranker model loaded successfully\n";
+      }
     }
 
     // Load LLM model
@@ -214,7 +241,9 @@ int main(int argc, char** argv) {
     }
 
     // Create pipeline without loader for interactive phase
-    RAGPipeline pipeline(nullptr, embedder, index, llm, sqlite_db);
+    RAGPipeline pipeline(nullptr, embedder, index, llm, sqlite_db,
+                         config.top_k, reranker,
+                         config.rerank_candidates);
 
     std::cout << "╔════════════════════════════════════════════════════════════╗\n"
               << "║         NativeRAG - Interactive Mode                       ║\n"
@@ -258,4 +287,3 @@ int main(int argc, char** argv) {
 
   return 1;
 }
-

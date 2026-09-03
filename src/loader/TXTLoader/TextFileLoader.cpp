@@ -12,7 +12,7 @@ namespace mobile_rag {
 
 std::vector<std::string> TextFileLoader::load_and_split(const std::string& file_path) {
   // Phase 1: only .txt
-  TxtLoader loader(/*num_threads=*/1);
+  TxtLoader loader;
   auto texts = loader.load_texts(file_path);
   if (texts.empty()) {
     std::cerr << "[TextFileLoader] No .txt content found at: " << file_path << '\n';
@@ -32,6 +32,5 @@ std::vector<std::string> TextFileLoader::load_and_split(const std::string& file_
 }
 
 }  // namespace mobile_rag
-
 
 

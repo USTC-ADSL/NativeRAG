@@ -45,30 +45,6 @@ bool SqliteVectorDB::initialize_schema() {
   return true;
 }
 
-bool SqliteVectorDB::add_vectors(
-    const std::vector<std::vector<float>>& /*vectors*/,
-    const std::vector<int64_t>& /*ids*/) {
-  // Text-only schema: embeddings are not stored in SQLite.
-  // Nothing to do here; return success.
-  return true;
-}
-
-std::vector<std::pair<int64_t, float>> SqliteVectorDB::search(
-    const std::vector<float>& /*query_vector*/, int /*k*/) {
-  // TODO: Implement similarity search via sqlite-vec; placeholder empty result
-  return {};
-}
-
-bool SqliteVectorDB::save_index(const std::string& /*index_path*/) {
-  // SQLite DB is already persisted at db_path_
-  return true;
-}
-
-bool SqliteVectorDB::load_index(const std::string& /*index_path*/) {
-  // Already opened in constructor; return true if DB handle is valid
-  return db_ != nullptr;
-}
-
 bool SqliteVectorDB::add_texts(const std::vector<std::string>& texts,
                                const std::vector<int64_t>& ids) {
   if (!db_) return false;
@@ -130,39 +106,6 @@ bool SqliteVectorDB::add_texts(const std::vector<std::string>& texts,
   return true;
 }
 
-bool SqliteVectorDB::set_text_for_id(int64_t id, const std::string& text) {
-  if (!db_) return false;
-  const char* sql = "INSERT INTO texts (id, text) VALUES (?, ?) "
-                    "ON CONFLICT(id) DO UPDATE SET text=excluded.text;";
-  sqlite3_stmt* stmt = nullptr;
-  int rc = sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr);
-  if (rc != SQLITE_OK) {
-    std::cerr << "[SqliteVectorDB] Prepare failed in set_text_for_id: "
-              << sqlite3_errmsg(db_) << '\n';
-    return false;
-  }
-  rc = sqlite3_bind_int64(stmt, 1, static_cast<sqlite3_int64>(id));
-  if (rc != SQLITE_OK) {
-    std::cerr << "[SqliteVectorDB] bind id failed: " << sqlite3_errmsg(db_) << '\n';
-    sqlite3_finalize(stmt);
-    return false;
-  }
-  rc = sqlite3_bind_text(stmt, 2, text.c_str(), -1, SQLITE_TRANSIENT);
-  if (rc != SQLITE_OK) {
-    std::cerr << "[SqliteVectorDB] bind text failed: " << sqlite3_errmsg(db_) << '\n';
-    sqlite3_finalize(stmt);
-    return false;
-  }
-  rc = sqlite3_step(stmt);
-  if (rc != SQLITE_DONE) {
-    std::cerr << "[SqliteVectorDB] step failed: " << sqlite3_errmsg(db_) << '\n';
-    sqlite3_finalize(stmt);
-    return false;
-  }
-  sqlite3_finalize(stmt);
-  return true;
-}
-
 std::string SqliteVectorDB::get_text_for_id(int64_t id) const {
   if (!db_) return {};
   const char* sql = "SELECT text FROM texts WHERE id = ?;";
@@ -190,6 +133,5 @@ std::string SqliteVectorDB::get_text_for_id(int64_t id) const {
 }
 
 }  // namespace mobile_rag
-
 
 
