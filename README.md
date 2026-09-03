@@ -255,27 +255,6 @@ export LD_LIBRARY_PATH="$PWD/lib"
 
 OpenCL shell 还应将 vendor library 目录加入 `LD_LIBRARY_PATH`。HTP shell 还应设置部署脚本中的 `ADSP_LIBRARY_PATH` 和 `GGML_HEXAGON_*` 变量。
 
-### 二阶段检索与 Reranker
-
-Reranker 只参与查询阶段，构建 Faiss 索引时不需要加载。启用 `--reranker-model` 后：
-
-1. Faiss 先返回 `--rerank-candidates` 个向量候选；
-2. SQLite 根据 Faiss ID 取回对应原文，SQLite 不计算相似度也不决定顺序；
-3. Reranker 对每个 `(query, document)` 单独计算相关性分数；
-4. 候选按 `rerank_score` 稳定降序排列，最后只输出 `--top-k` 个文本块给 LLM。
-
-因此 `--rerank-candidates` 应大于等于 `--top-k`。候选数越大，越可能挽回第一阶段排序不理想的相关文本，但 Reranker 推理次数、延迟和功耗也线性增加。设备端可先从 `top-k=2`、`rerank-candidates=4~10` 开始测量。
-
-启用成功时会看到类似输出：
-
-```text
-[LlamaCppReranker] Loaded CPU model on CPU, mode=yes-no-logits, context=4096, batch=2048
-[RERANK] Scored 4 Faiss candidate(s) with llama.cpp
-[TOP-1] id=... faiss_rank=... retrieval_score=... rerank_score=... | ...
-```
-
-`faiss_rank` 和 `retrieval_score` 是第一阶段结果，`rerank_score` 是第二阶段结果。若 Top-1 的 `faiss_rank` 大于 1，就能直接证明最终顺序被 Reranker 改变；无 `--reranker-model` 时保持原有单阶段 Faiss 行为。
-
 ### HNSW
 
 ```sh
